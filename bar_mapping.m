@@ -1,11 +1,18 @@
 
 % 
-% rt_detection.m
+% bar_mapping.m
 % 
-% Use Win32 Start/EndFix, Start/EndSacc events from EyeLinkServer to
-% control the timing on states in this training version of the reaction
-% time detection task used by Jackson Smith's optogenetics project in the
-% lab of Pascal Fries.
+% Automated receptive field mapping algorithm. An implementation of Fiorani
+% et al. (2014, J. Neurosci. Methods, 221, 112-126). Moves a bar in
+% specified directions. Uses SynapseAPI and tdt-windowed-buffering to store
+% and retrieve spiking and MUA signals containing visual responses. These
+% are projected onto a spatial map, so that the RF location can be
+% visualised and estimated.
+% 
+% Uses Win32 StimServerAnimationDone event from StimServer to
+% control the timing on states.
+% 
+% Jackson Smith - Dec 2022 - Fries Lab (ESI Frankfurt)
 % 
 
 %%% GLOBAL INITIALISATION %%%
@@ -27,25 +34,16 @@ if  TrialData.currentTrial == 1
   % Store local pointer to table defining blocks of trials
   P.tab = ARCADE_BLOCK_SELECTION_GLOBAL.tab ;
   
-    % Contrast string regular expression
-    P.constrreg = '(?<=con)([01]?(\.\d+)?)' ;
-  
     % Task-specific validity tests on block definition table
-    P.tab = tabvalchk( P.tab , P.constrreg ) ;
-    
-    % Are there any trial conditions that mirror the target?
-    P.mirror = any( strcmp( P.tab.Mirror , 'on' ) ) ;
+    P.tab = tabvalchk( P.tab ) ;
   
   % Handle to session's behavioural store object
   P.bhv = SGLBehaviouralStore.launch ;
   
   % Define state names, column of cells
-  P.nam = { 'Start' , 'HoldFix' , 'Wait' , 'TargetOn' , ...
-    'ResponseWindow' , 'Saccade' , 'GetSaccadeTarget' , 'Evaluate' , ...
-      'TargetSelected' , 'Microsaccade' , 'NothingSelected' , 'GetFix' ,...
-        'FalseAlarmSaccade' , 'Ignored' , 'Blink' , 'BrokenFix' , ...
-          'BrokenSaccade' , 'EyeTrackError' , 'FalseAlarm' , 'Missed' , ...
-            'Failed' , 'Correct' , 'cleanUp' }' ;
+  P.nam = { 'Start' , 'HoldFix' , 'Wait' , 'BarOn' , 'GetFix' , ...
+    'Ignored' , 'Blink' , 'BrokenFix' , 'EyeTrackError' , 'Correct' , ...
+      'cleanUp' }' ;
   
   % Event marker codes for each state
   [ P.evm , P.evh ] = event_marker( P.nam ) ;
@@ -54,8 +52,7 @@ if  TrialData.currentTrial == 1
   P.err = ARCADE_BLOCK_SELECTION_GLOBAL.err ;
   
   % Open Win32 inter-process communication events
-  for  E = { 'StartSacc' , 'EndSacc' , 'StartFix' , 'FalseAlarmFlag' , ...
-      'Waiting' , 'BlinkStart' , 'BlinkEnd' }
+  for  E = { 'StimServerAnimationDone' }
     name = E{ 1 } ;
     P.( name ) = IPCEvent( name ) ;
   end
@@ -71,10 +68,6 @@ if  TrialData.currentTrial == 1
   % Screen size in degrees
   P.screendegs = P.screensize ./ P.pixperdeg ;
   
-  % Previous trial eye track window parameters
-  P.EyeTrack = struct( 'RfXDeg' , NaN , 'RfYDeg' , NaN , ...
-    'RfRadDeg' , NaN , 'RfWinFactor' , NaN , 'FixTolDeg' , NaN ) ;
-  
   % Create flicker objects
   P.Flicker.stim = Rectangle ;
   P.Flicker.anim =   Flicker ;
@@ -89,49 +82,24 @@ if  TrialData.currentTrial == 1
   P.Target.circle   = Circle ;
   P.Target.gaussian = Gaussian ;
   P.Target.none     = P.Target.gaussian( [ ] ) ;
-  
-  % Create fixation point mask, so that the point is stable during flicker
-  P.FixMask = Circle ;
-  
-    P.FixMask.faceColor( : ) = cfg.BackgroundRGB ;
-    P.FixMask.diameter = 0.5 * P.pixperdeg ;
     
   % Create gaze fixation stimulus
-  P.Fix = Rectangle ;
+  P.Fix = Circle ;
   
     % Parameters are fixed
     P.Fix.position = [ 0 , 0 ] ;
     P.Fix.faceColor( : ) = 255 ;
-    P.Fix.lineColor( : ) = 0 ;
+    P.Fix.lineColor( : ) = 255 ;
     P.Fix.lineWidth = 1 ;
     P.Fix.drawMode = 3 ;
-    P.Fix.width = sqrt( pi * 0.075 ^ 2 ) * P.pixperdeg ;
-    P.Fix.height = P.Fix.width ;
-    P.Fix.angle = 45 ;
+    P.Fix.diameter = 0.15 * P.pixperdeg ;
     
-    % Base mask values on fixation point
-    P.FixMask.position = P.Fix.position ;
+    % Fixation window tolerance. Use this to detect if the value has
+    % changed beteween trials.
+    P.FixTol = [ ] ;
   
-  % Look for set of Mondrian mask files
-  P.Mondrian.files = dir( 'C:\Toolbox\Mondrian\*png' ) ;
-  
-    % No files found
-    if  isempty( P.Mondrian.files )
-      error( 'No ITI Mondrian masks found in C:\Toolbox\Mondrian\*png' )
-    end
-    
-  % Initialise inter-trial-interval stimulus handle pointers
-  P.ItiStim.current  = [ ] ;
-  P.ItiStim.previous = [ ] ;
-  
-  % Make reaction time start and end time variables, and tic time
-  % measurement at end of previous trial for ITI measure
-  P.RTstart  = StateRuntimeVariable ;
-  P.RTend    = StateRuntimeVariable ;
+  % Make tic time measurement at end of previous trial for ITI measure
   P.ITIstart = StateRuntimeVariable ;
-  
-    % Initialise P.ITIstart to zero, so that we don't wait on first trial
-    P.ITIstart.value = zeros( 1 , 'uint64' ) ;
   
   % Create and initialise behaviour plots
   P.ofig = creatbehavfig( cfg , P.err , P.tab ) ;
@@ -207,10 +175,11 @@ drawnow
 %%% Trial variables %%%
 
 % Error check editable variables
-v = evarchk( RewardMaxMs , RfXDeg , RfYDeg , RfRadDeg , RfWinFactor , ...
-  FixTolDeg , TrainingMode , BaselineMs , WaitAvgMs , WaitMaxProb , ...
-    ReacTimeMinMs , RespWinWidMs , RewardSlope , RewardMinMs , ...
-      RewardFailFrac , ScreenGamma , ItiMinMs ) ;
+v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
+  BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
+    BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
+      TdtExperiment , TdtChannels , SpikeBuffer , MuaLfpBuffer , ...
+        VisualLatencyMs , EnableFB128 , SynthRfXywDeg ) ;
 
 % Record pixels per degree, computed locally
 v.pixperdeg = P.pixperdeg ;
@@ -218,59 +187,20 @@ v.pixperdeg = P.pixperdeg ;
 % Add type of block
 v.BlockType = ARCADE_BLOCK_SELECTION_GLOBAL.typ ;
 
-% In training mode, we randomly sample the target location and size. This
-% will affect the value of the relevant editable variables.
-switch  TrainingMode
-  
-  % Training mode is disabled, do not sample target parameters
-  case    'off' , sampletarg = false ;
-    
-  % Sample on every trial
-  case  'trial' , sampletarg =  true ;
-    
-  % Sample only on first trial of a new block
-  case  'block' , sampletarg = TrialData.currentTrial == 1  ||  ...
-                               pre.blocks( end - 1 ) ~= pre.blocks( end ) ;
-    
-  % evarchk should screen this out. If not then it is incorrect.
-  otherwise , warning( 'Invalid TrainingMode string: %s' , TrainingMode )
-              sampletarg = false ;
-end % eval TrainingMode
-
-% Sample target position and update the value of editable variables
-if  sampletarg , [ v, RfXDeg, RfYDeg, RfRadDeg ] = newtarget( P , v ) ; end
-
 % Convert variables with degrees into pixels, without destroying original
 % value in degrees
-for  F = { 'RfXDeg' , 'RfYDeg' , 'RfRadDeg' , 'FixTolDeg' } ; f = F{ 1 } ;
+for  F = { 'BarOriginDeg' , 'TravelDiameterDeg' , 'BarWidthHightDeg' , ...
+    'BarSpeedDegPerSec' , 'FixTolDeg' , 'SynthRfXywDeg' } ; f = F{ 1 } ;
   
   vpix.( f ) = v.( f ) * P.pixperdeg ;
   
 end % deg2pix
 
-% Sample wait duration
-WaitMs = min( exprnd( WaitAvgMs ) , expinv( WaitMaxProb , WaitAvgMs ) ) ;
-
-  % Make a copy of this trial's waiting time, minus baseline
-  v.WaitMs = WaitMs ;
-
 % Compute reward size for correct performance
-rew = rewardsize( P.err.Correct , ...
-  expcdf( WaitMs , WaitAvgMs ) / WaitMaxProb , RewardSlope , ...
-    RewardMinMs , RewardMaxMs );
+rew = max( RewardMinMs , Reward ) ;
   
-  % And for failed trial [ correct reward , failed reward ]
-  rew = [ rew , RewardFailFrac * rew ] ;
-  
-  % Round up to next millisecond and guarantee minimum reward size
-  rew = max( RewardMinMs , ceil( rew ) ) ;
-  
-  % Store reward sizes
-  v.Reward_Correct = rew( 1 ) ;
-  v.Reward_Failed  = rew( 2 ) ;
-  
-% Add baseline period, this is now the duration of the Wait state.
-WaitMs = WaitMs  +  BaselineMs ;
+  % Store reward size
+  v.Reward = rew ;
 
 % Ask StimServer.exe to apply a measure of luminance Gamma correction
 StimServer.InvertGammaCorrection( ScreenGamma ) ;
@@ -278,49 +208,29 @@ StimServer.InvertGammaCorrection( ScreenGamma ) ;
 
 %%% Eye Tracking %%%
 
-% Check to see if any eye tracking window params have changed since last
-% trial, because editable variables were changed during task pause. Don't
-% reset and rebuild windows if unnecessary because trackeye wastes 500ms on
-% each reset (as of ARCADE v2.6).
-if  ~ all(  cellfun( @( f ) v.( f ) == P.EyeTrack.( f ) , ...
-                                              fieldnames( P.EyeTrack ) )  )
+% Check to see if fixation point eye tracking window tolerence has changed
+% since last trial, because editable variables were changed during task
+% pause. Don't reset and rebuild windows if unnecessary because trackeye
+% wastes 500ms on each reset (as of ARCADE v2.6).
+if  P.FixTol ~= FixTolDeg
 
   % Delete any existing eye window
   trackeye( 'reset' ) ;
 
   % Create fixation and target eye windows
   trackeye( [ 0 , 0 ] , vpix.FixTolDeg , 'Fix' ) ;
-  trackeye( [ vpix.RfXDeg , vpix.RfYDeg ] , vpix.RfRadDeg * RfWinFactor,...
-    'Target' ) ;
   
-  % Mirrored target position is used, so make a corresponding window
-  if  P.mirror
-    trackeye( -[ vpix.RfXDeg , vpix.RfYDeg ] , ...
-      vpix.RfRadDeg * RfWinFactor , 'Mirror' ) ;
-  end
-  
-  % Remember new values
-  for  F = fieldnames( P.EyeTrack )' , f = F{ 1 } ;
-    P.EyeTrack.( f ) = v.( f ) ;
-  end
+  % Remember new value
+  P.FixTol = FixTolDeg ;
 
 end % update eye windows
 
-% Properties of current trial condition. Used in 'Stimulus configuration'.
-c = table2struct(  ...
-      P.tab( TrialData.currentCondition == P.tab.Condition , : )  ) ;
-
-% Evaluate target mirroring. If mirror is on then the target is reflected
-% across the fixation point. Make sure that the correct eye window is used
-% to evaluate behaviour.
-switch  c.Mirror
-  case   'on' , TargetIn = 'MirrorIn' ;
-  case  'off' , TargetIn = 'TargetIn' ;
-  otherwise , error( 'Invalid Mirror value: %s' , c.Mirror )
-end
-
 
 %%% Stimulus configuration %%%
+
+% Properties of current trial condition.
+c = table2struct(  ...
+      P.tab( TrialData.currentCondition == P.tab.Condition , : )  ) ;
 
 % Reset flicker colour
 P.Flicker.stim.faceColor( : ) = double( intmax( 'uint8' ) ) ;
@@ -383,54 +293,6 @@ if  c.BackgroundFlickerHz
 else , BackFlic = P.Target.none ; FixMask = P.Target.none ;
 end
 
-% Apply optional reflection of target position across fixation point. This
-% coefficient can be multiplied into the set target location. mirror is +1
-% if mirror is off, and it is -1 if the mirror is on.
-mirror = strcmp( c.Mirror , 'off' ) - strcmp( c.Mirror , 'on' ) ;
-
-% Point to specified target
-Target = P.Target.( c.Target ) ;
-
-  % Configure target stimulus for upcoming trial, according to type
-  switch  c.Target
-    
-    case  'none' % no action required
-      
-    case  'gaussian'
-      
-      Target.position = mirror .* [ vpix.RfXDeg , vpix.RfYDeg ] ;
-      Target.sdx = vpix.RfRadDeg / 3 ;
-      Target.sdy = Target.sdx ;
-      Target.color( : ) = Weber( c.Contrast , WaitBak{ 2 } ) ;
-      
-    otherwise , error( 'Unrecognised target stimulus: %s' , c.Target )
-      
-  end % config targ stim
-  
-% Inter-trial stimulus' handle pointer swap. Previous trials's stimulus is
-% currently being presented, and will be destroyed at the end of the inter-
-% trial-interval that is now being executed.
-P.ItiStim.previous = P.ItiStim.current ;
-
-% Inter-trial stimulus to be presented at the end of the upcoming trial
-switch  c.ItiStimulus
-  
-  % Empty Stimulus object
-  case  'none' , P.ItiStim.current = P.Target.none ;
-    
-  % Randomly selected Mondrian mask
-  case  'mondrian'
-    
-    % Random draw
-    i = ceil( rand * numel( P.Mondrian.files ) ) ;
-    
-    % Create Picture object to display this file on screen
-    P.ItiStim.current = Picture( fullfile( P.Mondrian.files( i ).folder,...
-      P.Mondrian.files( i ).name ) ) ;
-    
-  otherwise , error( 'Unrecognised ITI stimulus: %s' , c.ItiStimulus )
-end
-
 
 %%% DEFINE TASK STATES %%%
 
@@ -472,24 +334,12 @@ STATE_TABLE = ...
 {           'Start' , 5000 , 'Ignored'        ,     'FixIn' , 'HoldFix' , { 'Stim' , { P.Fix } , 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] } , 'Photodiode' , 'off' , 'Reset' , P.Waiting } ;
           'HoldFix' ,  300 , 'Wait'           ,    'FixOut' , 'GetFix' , { 'StimProp' , { P.Fix , 'faceColor' , [ 255 , 255 , 255 ] } } ;
              'Wait' ,WaitMs, 'TargetOn'       ,  { 'FixOut' , 'StartSacc' } , { 'BrokenFix' , 'FalseAlarmSaccade' } , [ { 'Reset' , [ P.StartSacc , P.EndSacc , P.BlinkStart , P.BlinkEnd , P.FalseAlarmFlag ] , 'Trigger' , P.Waiting , 'Photodiode' , 'on' , 'Stim' , { FixMask , BackFlic } } , WaitBak ] ;
-     'TargetOn' ,ReacTimeMinMs, 'ResponseWindow' ,  { 'FixOut' , 'StartSacc' } , { 'BrokenFix' , 'FalseAlarmSaccade' } , { 'Stim' , { Target } , 'Photodiode' , 'off' , 'RunTimeVal' , P.RTstart } ;
-'ResponseWindow', RespWinWidMs, 'Failed'         ,  { 'FixOut' , 'StartSacc' } , { 'BrokenFix' , 'Saccade' } , { 'Reset' , P.Waiting } ;
-          'Saccade' ,  125 , 'BrokenSaccade'  ,  { 'BlinkStart' , 'EndSacc' } , { 'Blink' , 'GetSaccadeTarget' } , { 'Reset' , P.StartFix , 'RunTimeVal' , P.RTend } ;
- 'GetSaccadeTarget' ,  100 , 'EyeTrackError'  ,  'StartFix' , 'Evaluate' , {} ;
-         'Evaluate' ,    0 , 'EyeTrackError'  ,  { TargetIn , 'FixIn' , 'FixOut' } , { 'TargetSelected' , 'Microsaccade' , 'NothingSelected' } , {} ;
-   'TargetSelected' ,    0 , 'Correct'        , 'FalseAlarmFlag' , 'FalseAlarm' , {} ;
-     'Microsaccade' ,    0 , 'EyeTrackError'  , {} , {} , {} ;
-  'NothingSelected' ,    0 , 'Missed'         ,   'Waiting' , 'BrokenFix' , {} ;
+     'BarOn' ,ReacTimeMinMs, 'ResponseWindow' ,  { 'FixOut' , 'StartSacc' } , { 'BrokenFix' , 'FalseAlarmSaccade' } , { 'Stim' , { Target } , 'Photodiode' , 'off' , 'RunTimeVal' , P.RTstart } ;
            'GetFix' , 5000 , 'Ignored'        ,     'FixIn' , 'HoldFix' , { 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] } } ;
-'FalseAlarmSaccade' ,    0 , 'Saccade'        , {} , {} , { 'Trigger' , P.FalseAlarmFlag } ;
           'Ignored' ,    0 , 'cleanUp'        , {} , {} , {} ;
             'Blink' , 5000 , 'cleanUp'        , 'BlinkEnd' , 'cleanUp' , {} ;
         'BrokenFix' ,    0 , 'cleanUp'        , {} , {} , {} ;
-    'BrokenSaccade' ,    0 , 'cleanUp'        , {} , {} , {} ;
     'EyeTrackError' ,    0 , 'cleanUp'        , {} , {} , {} ; 
-       'FalseAlarm' ,    0 , 'cleanUp'        , {} , {} , {} ;
-           'Missed' ,    0 , 'cleanUp'        , {} , {} , {} ;
-           'Failed' ,    0 , 'cleanUp'        , {} , {} , { 'Reward' , v.Reward_Failed  } ;
           'Correct' ,    0 , 'cleanUp'        , {} , {} , { 'Reward' , v.Reward_Correct } ;
           'cleanUp' ,    0 , 'final'          , {} , {} , { 'Photodiode' , 'off' , 'Background' , cfg.BackgroundRGB , 'Stim' , { P.ItiStim.current } , 'StimProp' , { P.Fix , 'visible' , false , Target , 'visible' , false , BackFlic , 'visible' , false , FixMask , 'visible' , false } } ;
 } ;
@@ -612,8 +462,7 @@ end % persist
 function  tab = tabvalchk( tab , cstrreg )
   
   % Required columns, the set of column headers
-  colnam = { 'ItiStimulus' , 'WaitBackground' , 'BackgroundFlickerHz' , ...
-    'Target' , 'Contrast' , 'Mirror' } ;
+  colnam = { 'DirectionDeg' } ;
   
   % Numerical type check
   fnumchk = @( c ) isnumeric( c ) && isreal( c ) && all( isfinite( c ) ) ;
@@ -635,37 +484,16 @@ function  tab = tabvalchk( tab , cstrreg )
       'UniformOutput' , false ) ) , [ 0 , 1 ] ) ;
   
   % Error checking for each column. Return true if column's type is valid.
-  valid.ItiStimulus = @iscellstr ;
-  valid.WaitBackground = @iscellstr ;
-  valid.BackgroundFlickerHz = fnumchk ;
-  valid.Target = @iscellstr ;
-  valid.Contrast = fnumchk ;
-  valid.Mirror = @iscellstr ;
+  valid.DirectionDeg = fnumchk ;
   
   % Support, what values are valid for each column?
-  sup.ItiStimulus = { 'none' , 'mondrian' } ;
-  sup.WaitBackground = { 'default' , 'red' , 'black' } ;
-  sup.BackgroundFlickerHz = [ 0 , round( StimServer.GetFrameRate ) / 2 ] ;
-  sup.Target = { 'none' , 'gaussian' , 'circle' } ;
-  sup.Contrast = [ -1 , +1 ] ;
-  sup.Mirror = { 'off' , 'on' } ;
+  sup.DirectionDeg = [ 0 , 360 ] ;
   
   % Support check function
-  supchk.ItiStimulus = fstrsup ;
-  supchk.WaitBackground = ...
-    @( str , sup ) fstrsup( str , sup ) | fconsup( str ) ;
-  supchk.BackgroundFlickerHz = fnumsup ;
-  supchk.Target = fstrsup ;
-  supchk.Contrast = fnumsup ;
-  supchk.Mirror = fstrsup ;
+  supchk.DirectionDeg = fnumsup ;
   
   % Define support error message
-  superr.ItiStimulus = fstrerr( sup.ItiStimulus ) ;
-  superr.WaitBackground = fstrerr( [ sup.ItiStimulus , { cstrreg } ] ) ;
-  superr.BackgroundFlickerHz = fnumerr( sup.BackgroundFlickerHz ) ;
-  superr.Target = fstrerr( sup.Target ) ;
-  superr.Contrast = fnumerr( sup.Contrast ) ;
-  superr.Mirror = fstrerr( sup.Mirror ) ;
+  superr.DirectionDeg = fnumerr( sup.DirectionDeg ) ;
   
   % Retrieve table's name
   tabnam = tab.Properties.UserData ;
