@@ -1,8 +1,10 @@
 
-function  v = evarchk( RewardMaxMs , RfXDeg , RfYDeg , RfRadDeg , ...
-  RfWinFactor , FixTolDeg , TrainingMode , BaselineMs , WaitAvgMs , ...
-    WaitMaxProb , ReacTimeMinMs , RespWinWidMs , RewardSlope , ...
-      RewardMinMs , RewardFailFrac , ScreenGamma , ItiMinMs )
+function  v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
+  BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
+    BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
+      TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
+        MuaStartIndex , MuaBuffer , VisualLatencyMs , StimRespSim , ...
+          SynthRfXywDeg )
 % 
 % evarchk( <ARCADE editable variables> )
 % 
@@ -11,51 +13,64 @@ function  v = evarchk( RewardMaxMs , RfXDeg , RfYDeg , RfRadDeg , ...
 % 
   
   % Define inclusive limits to each Numeric variable, or the set of valid
-  % strings for a Text variable
-  lim.RewardMaxMs = [ 0 , Inf ] ;
-  lim.RfXDeg = [ -Inf , +Inf ] ;
-  lim.RfYDeg = [ -Inf , +Inf ] ;
-  lim.RfRadDeg = [ 0 , +Inf ] ;
-  lim.RfWinFactor = [ 0 , +Inf ] ;
-  lim.FixTolDeg = [ 0 , Inf ] ;
-  lim.TrainingMode = { 'off' , 'trial' , 'block' } ;
-  lim.BaselineMs = [ 0 , Inf ] ;
-  lim.WaitAvgMs = [ 0 , Inf ] ;
-  lim.WaitMaxProb = [ 0 , 1 ] ;
-  lim.ReacTimeMinMs = [ 0 , Inf ] ;
-  lim.RespWinWidMs = [ 0 , Inf ] ;
-  lim.RewardSlope = [ 0 , Inf ] ;
-  lim.RewardMinMs = [ 0 , Inf ] ;
-  lim.RewardFailFrac = [ 0 , 1 ] ;
-  lim.ScreenGamma = [ 0 , Inf ] ;
-  lim.ItiMinMs = [ 0 , Inf ] ;
+  % strings for a Text variable. Limit check is skipped if empty.
+  lim.Reward = [ 0 , Inf ] ;
+  lim.BarOriginDeg = [ -Inf , +Inf ] ;
+  lim.TravelDiameterDeg = [ 0 , +Inf ] ;
+  lim.BarWidthHightDeg = [ 0 , +Inf ] ;
+  lim.BarSpeedDegPerSec = [ 0 , +Inf ] ;
+  lim.BarRGB = [ 0 , 2 ^ 8 - 1 ] ;
+  lim.FixTolDeg = [ 0 , +Inf ] ;
+  lim.BaselineMs = [ 0 , +Inf ] ;
+  lim.RewardMinMs = [ 0 , +Inf ] ;
+  lim.ScreenGamma = [ 0 , +Inf ] ;
+  lim.ItiMinMs = [ 0 , +Inf ] ;
+  lim.TdtHostPC = { } ;
+  lim.TdtExperiment = { } ;
+  lim.LaserController = { } ;
+  lim.TdtChannels = [ 1 , 32 ] ;
+  lim.SpikeBuffer = { } ;
+  lim.MuaStartIndex = [ 1 , 32 ] ;
+  lim.MuaBuffer = { } ;
+  lim.VisualLatencyMs = [ 0 , +Inf ] ;
+  lim.StimRespSim = { } ;
+  lim.SynthRfXywDeg = [ -Inf , +Inf ] ;
   
   % Pack input into struct
-  v.RewardMaxMs = RewardMaxMs ;
-  v.RfXDeg = RfXDeg ;
-  v.RfYDeg = RfYDeg ;
-  v.RfRadDeg = RfRadDeg ;
-  v.RfWinFactor = RfWinFactor ;
+  v.Reward = Reward ;
+  v.BarOriginDeg = BarOriginDeg ;
+  v.TravelDiameterDeg = TravelDiameterDeg ;
+  v.BarWidthHightDeg = BarWidthHightDeg ;
+  v.BarSpeedDegPerSec = BarSpeedDegPerSec ;
+  v.BarRGB = BarRGB ;
   v.FixTolDeg = FixTolDeg ;
-  v.TrainingMode = TrainingMode ;
   v.BaselineMs = BaselineMs ;
-  v.WaitAvgMs = WaitAvgMs ;
-  v.WaitMaxProb = WaitMaxProb ;
-  v.ReacTimeMinMs = ReacTimeMinMs ;
-  v.RespWinWidMs = RespWinWidMs ;
-  v.RewardSlope = RewardSlope ;
   v.RewardMinMs = RewardMinMs ;
-  v.RewardFailFrac = RewardFailFrac ;
   v.ScreenGamma = ScreenGamma ;
   v.ItiMinMs = ItiMinMs ;
+  v.TdtHostPC = TdtHostPC ;
+  v.TdtExperiment = TdtExperiment ;
+  v.LaserController = LaserController ;
+  v.TdtChannels = TdtChannels ;
+  v.SpikeBuffer = SpikeBuffer ;
+  v.MuaStartIndex = MuaStartIndex ;
+  v.MuaBuffer = MuaBuffer ;
+  v.VisualLatencyMs = VisualLatencyMs ;
+  v.StimRespSim = StimRespSim ;
+  v.SynthRfXywDeg = SynthRfXywDeg ;
   
   % Numeric variables
   for  N = fieldnames( v )' ; n = N{ 1 } ;
     
-    % Check type. First see if variable is expected to be Text
-    if  iscellstr( lim.( n ) )
+    % Empty field signals that we skip checks on these vars
+    if  isempty( lim.( n ) )
       
-      % Check that variable is string
+      continue
+      
+    % Check type. First see if variable is expected to be Text
+    elseif  iscellstr( lim.( n ) )
+      
+      % Check that variable is classic string
       if  ~ ischar( v.( n ) )  ||  ~ isrow( v.( n ) )
         error( '%s must be a char row vector i.e. a string' , n )
       end

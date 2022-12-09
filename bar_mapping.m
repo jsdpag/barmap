@@ -35,8 +35,8 @@ v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
   BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
     BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
       TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
-        MuaLfpStartIndex , MuaBuffer , LfpBuffer , VisualLatencyMs , ...
-          StimRespSim , SynthRfXywDeg ) ;
+        MuaStartIndex , MuaBuffer , VisualLatencyMs , StimRespSim , ...
+          SynthRfXywDeg ) ;
 
 
 %%% FIRST TRIAL INITIALISATION -- PERSISTENT DATA %%%
@@ -48,9 +48,6 @@ if  TrialData.currentTrial == 1
   
     % Task-specific validity tests on block definition table
     P.tab = tabvalchk( P.tab ) ;
-  
-  % Handle to session's behavioural store object
-  P.bhv = SGLBehaviouralStore.launch ;
   
   % Define state names, column of cells
   P.nam = { 'Start' , 'HoldFix' , 'Wait' , 'BarOn' , 'GetFix' , ...
@@ -101,8 +98,8 @@ if  TrialData.currentTrial == 1
   
     % Parameters are fixed
     P.Fix.position = [ 0 , 0 ] ;
-    P.Fix.faceColor( : ) = 255 ;
-    P.Fix.lineColor( : ) = 255 ;
+    P.Fix.faceColor( : ) = BarRGB ;
+    P.Fix.lineColor( : ) = BarRGB ;
     P.Fix.lineWidth = 1 ;
     P.Fix.drawMode = 3 ;
     P.Fix.diameter = 0.15 * P.pixperdeg ;
@@ -225,8 +222,8 @@ v.BlockType = ARCADE_BLOCK_SELECTION_GLOBAL.typ ;
 
 % Convert variables with degrees into pixels, without destroying original
 % value in degrees
-for  F = { 'BarOriginDeg' , 'TravelDiameterDeg' , 'BarWidthHightDeg' , ...
-    'BarSpeedDegPerSec' , 'FixTolDeg' , 'SynthRfXywDeg' } ; f = F{ 1 } ;
+for  F = { 'BarOriginDeg' , 'TravelDiameterDeg' , 'FixTolDeg' , ...
+    'SynthRfXywDeg' } ; f = F{ 1 } ;
   
   vpix.( f ) = v.( f ) * P.pixperdeg ;
   
@@ -265,8 +262,8 @@ end % update eye windows
 %%% Stimulus configuration %%%
 
 % Properties of current trial condition.
-c = table2struct(  ...
-      P.tab( TrialData.currentCondition == P.tab.Condition , : )  ) ;
+c = P.tab( TrialData.currentCondition == P.tab.Condition , : ) ;
+c = table2struct( c ) ;
 
 % Bar orientation
 P.Bar.angle = c.DirectionDeg ;
@@ -282,10 +279,10 @@ P.Motion.vertices( 3 ) = cosd( c.DirectionDeg + 000 ) ;
 P.Motion.vertices( 4 ) = sind( c.DirectionDeg + 000 ) ;
 
 % Scale direction vectors by half of the travel distance
-P.Motion.vertices = P.Motion.vertices  ./  2  .*  vpix.TravelDiameterDeg ;
+P.Motion.vertices = vpix.TravelDiameterDeg / 2  *  P.Motion.vertices ;
 
 % Centre bar's motion onto the bar origin
-P.Motion.vertices = P.Motion.vertices + vpix.BarOriginDeg([1 2 1 2]) ;
+P.Motion.vertices = P.Motion.vertices  +  vpix.BarOriginDeg([1 2 1 2]) ;
 
 
 %%% DEFINE TASK STATES %%%
