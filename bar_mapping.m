@@ -9,6 +9,10 @@
 % are projected onto a spatial map, so that the RF location can be
 % visualised and estimated.
 % 
+% The photodiode square flips from white to black on the frame when the bar
+% appears. It reverts to white on the moment the bar has completed its
+% sweep. Hence, the photodiode square is white unless the bar is moving.
+% 
 % Uses Win32 StimServerAnimationDone event from StimServer to
 % control the timing on states.
 % 
@@ -26,6 +30,14 @@ pre = getPreviousTrialData ;
 % Gain access to block selection function's global variable
 global  ARCADE_BLOCK_SELECTION_GLOBAL ;
 
+% Error check editable variables
+v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
+  BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
+    BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
+      TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
+        MuaLfpStartIndex , MuaBuffer , LfpBuffer , VisualLatencyMs , ...
+          StimRespSim , SynthRfXywDeg ) ;
+
 
 %%% FIRST TRIAL INITIALISATION -- PERSISTENT DATA %%%
 
@@ -42,8 +54,7 @@ if  TrialData.currentTrial == 1
   
   % Define state names, column of cells
   P.nam = { 'Start' , 'HoldFix' , 'Wait' , 'BarOn' , 'GetFix' , ...
-    'Ignored' , 'Blink' , 'BrokenFix' , 'EyeTrackError' , 'Correct' , ...
-      'cleanUp' }' ;
+    'Ignored' , 'Blink' , 'BrokenFix' , 'Correct' , 'cleanUp' }' ;
   
   % Event marker codes for each state
   [ P.evm , P.evh ] = event_marker( P.nam ) ;
@@ -52,7 +63,7 @@ if  TrialData.currentTrial == 1
   P.err = ARCADE_BLOCK_SELECTION_GLOBAL.err ;
   
   % Open Win32 inter-process communication events
-  for  E = { 'StimServerAnimationDone' }
+  for  E = { 'StimServerAnimationDone' , 'BlinkStart' , 'BlinkEnd' }
     name = E{ 1 } ;
     P.( name ) = IPCEvent( name ) ;
   end
@@ -68,20 +79,22 @@ if  TrialData.currentTrial == 1
   % Screen size in degrees
   P.screendegs = P.screensize ./ P.pixperdeg ;
   
-  % Create flicker objects
-  P.Flicker.stim = Rectangle ;
-  P.Flicker.anim =   Flicker ;
+  % Create white bar visual stimulus object and set fixed properties
+  P.Bar = Rectangle ;
   
-    % Certain properties are fixed
-    P.Flicker.stim.faceColor( : ) = double( intmax( 'uint8' ) ) ;
-    P.Flicker.stim.width  = P.screensize( 1 ) ;
-    P.Flicker.stim.height = P.screensize( 2 ) ;
+    P.Bar.width  = BarWidthHightDeg( 1 ) .* P.pixperdeg ;
+    P.Bar.height = BarWidthHightDeg( 2 ) .* P.pixperdeg ;
+    P.Bar.faceColor( : ) = 2 ^ 8 - 1 ;
+    P.Bar.drawMode = 1 ;
+    P.Bar.visible = 0 ;
   
-  % Create target stimulus objects, a bit of trickery required to create an
-  % empty Stimulus object for 'none'.
-  P.Target.circle   = Circle ;
-  P.Target.gaussian = Gaussian ;
-  P.Target.none     = P.Target.gaussian( [ ] ) ;
+  % Create linear motion object for the bar and set fixed properties
+  P.Motion = LinearMotion( BarSpeedDegPerSec .* P.pixperdeg , [0 0 0 0] ) ;
+  
+    P.Motion.terminalAction = '00001101' ;
+  
+  % Ideal duration of one sweep by the bar, in milliseconds
+  P.sweeptime = TravelDiameterDeg ./ BarSpeedDegPerSec .* 1e3 ;
     
   % Create gaze fixation stimulus
   P.Fix = Circle ;
@@ -101,9 +114,12 @@ if  TrialData.currentTrial == 1
   % Make tic time measurement at end of previous trial for ITI measure
   P.ITIstart = StateRuntimeVariable ;
   
-  % Initialise ARCADE and Task connection to Synapse server on TDT HostPC
-  P.syn = initsynapse( cfg , TdtHostPC , TdtExperiment , SpikeBuffer , ...
-    MuaLfpBuffer ) ;
+  % Initialise connection to Synapse server on TDT HostPC
+  P.syn = initsynapse( cfg , TdtHostPC , TdtExperiment , ...
+    LaserController , SpikeBuffer , MuaBuffer , StimRespSim ) ;
+  
+    % Create a logical flag that is raised when synapse is in use
+    P.UsingSynapse = ~ isempty( P.syn ) ;
   
   % Create and initialise behaviour plots
   P.ofig = creatbehavfig( cfg , P.err , P.tab ) ;
@@ -183,12 +199,8 @@ drawnow
 if  TrialData.currentTrial > 1  &&  diff( pre.blocks( end - 1 : end ) )
   
   % Wait for user to examine online plot
-  waitfor( ...
-    msgbox( [ '\fontsize{14}Bar mapping is complete.' , newline , ...
-                             'Please examine RF map.' , newline , ...
-                            'Click OK when finished.' ] , ...
-      'Bar Mapping' , 'none' , struct( 'WindowStyle' , 'non-modal' , ...
-        'Interpreter' , 'tex' ) ) )
+  waitforuser( 'Bar Mapping' , 14 , ...
+    'Bar mapping is complete.\nPlease examine RF map.' )
   
   % We will end the running ARCADE session
   requestQuitSession ;
@@ -204,14 +216,6 @@ end % bar mapping is complete
 
 
 %%% Trial variables %%%
-
-% Error check editable variables
-v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
-  BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
-    BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
-      TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
-        MuaLfpStartIndex , MuaBuffer , LfpBuffer , VisualLatencyMs , ...
-          StimRespSim , SynthRfXywDeg ) ;
 
 % Record pixels per degree, computed locally
 v.pixperdeg = P.pixperdeg ;
@@ -264,85 +268,30 @@ end % update eye windows
 c = table2struct(  ...
       P.tab( TrialData.currentCondition == P.tab.Condition , : )  ) ;
 
-% Reset flicker colour
-P.Flicker.stim.faceColor( : ) = double( intmax( 'uint8' ) ) ;
+% Bar orientation
+P.Bar.angle = c.DirectionDeg ;
 
-% Determine screen background colour during Wait state
-switch  c.WaitBackground
-  case  'default' , WaitBak = { 'Background' ,   cfg.BackgroundRGB } ;
-  case    'black' , WaitBak = { 'Background' , [ 000 , 000 , 000 ] } ;
-  case      'red' , WaitBak = { 'Background' , [ 255 , 000 , 000 ] } ;
-  otherwise
-    
-    % Attempt to read background contrast
-    bakcon = regexp( c.WaitBackground , P.constrreg , 'tokens' , 'once' ) ;
-    
-    % Check for contrast
-    if  ~ isempty( bakcon )
-      
-      % regexp returns { <string> }, convert string to numeric
-      bakcon = str2double( bakcon{ 1 } ) ;
-      
-      % Convert from Michelson contrast into pixel delta
-      bakcon = bakcon .* cfg.BackgroundRGB ;
-      
-      % Set background ...
-      WaitBak = { 'Background' , max( 0 , cfg.BackgroundRGB - bakcon ) } ;
-      
-      % ... and flicker colours
-      P.Flicker.stim.faceColor( : ) = ...
-        min( double( intmax( 'uint8' ) ) , cfg.BackgroundRGB + bakcon ) ;
-    
-    % No recognisable contrast or valid background colour provided
-    else , error( 'Unrecognised Wait background: %s', c.WaitBackground )
-    end
-    
-end % background colour
+% Reset linear motion
+P.Bar.play_animation( P.Motion ) ;
 
-% Background flicker
-if  c.BackgroundFlickerHz
-  
-  % Determine number of frames per cycle. Divided by 2. One half of frames
-  % ON, the other half, OFF.
-  n = P.framerate  /  c.BackgroundFlickerHz  /  2 ;
-  
-  % There is a fractional component, so round up to next whole frame
-  if  mod( n , 1 ) , n = ceil( n ) ; end
-  
-  % Set flicker animation object parameters
-  P.Flicker.anim.SetFrames( n , n ) ;
-  
-  % Bind animation to background rectangle
-  P.Flicker.stim.play_animation( P.Flicker.anim ) ;
-  
-  % Point to background rectangle
-  BackFlic = P.Flicker.stim ;
-  
-  % Enable fixation point mask
-  FixMask = P.FixMask ;
-  
-% No background flicker , point to empty stimulus and fix point mask
-else , BackFlic = P.Target.none ; FixMask = P.Target.none ;
-end
+% Create unit direction vectors. First points to bar's starting position.
+% Second points to end position.
+P.Motion.vertices( 1 ) = cosd( c.DirectionDeg + 180 ) ;
+P.Motion.vertices( 2 ) = sind( c.DirectionDeg + 180 ) ;
+P.Motion.vertices( 3 ) = cosd( c.DirectionDeg + 000 ) ;
+P.Motion.vertices( 4 ) = sind( c.DirectionDeg + 000 ) ;
+
+% Scale direction vectors by half of the travel distance
+P.Motion.vertices = P.Motion.vertices  ./  2  .*  vpix.TravelDiameterDeg ;
+
+% Centre bar's motion onto the bar origin
+P.Motion.vertices = P.Motion.vertices + vpix.BarOriginDeg([1 2 1 2]) ;
 
 
 %%% DEFINE TASK STATES %%%
 
 % Special actions executed when state is finished executing. Remember to
 % make this a column vector of cells.
-
-  % Pause briefly to allow the first couple of FIXUPDATE events to stream
-  % from EyeLink to EyeLinkServer, which then needs time to adjust Win32
-  % events pertaining to target windows
-  ENDACT.GetSaccadeTarget = { @( ) sleep( 75 ) } ;
-
-  % Correct state. Calculate reaction time, convert unit from seconds to
-  % milliseconds. Report RT.
-  ENDACT.Correct = ...
-    { @( ) reactiontime( 'writeRT' , 1e3 * ( P.RTend.get_value( ) - ...
-             P.RTstart.get_value( ) ) ) ;
-      @( ) EchoServer.Write( '%8sRT %dms\n' , '' , ...
-             ceil( P.bhv.reactionTime( P.bhv.currentTrial ) ) ) } ;
   
   % cleanUp measures time that inter-trial-interval starts, then prints one
   % final message to show that all State objects have finished executing
@@ -355,6 +304,9 @@ end
 MAXREP_DEFAULT = 2 ;
 MAXREP_GETFIX  = 100 ;
 
+% BarOn timout is the ideal sweep time plus several frames
+BarTime = P.sweeptime  +  1e3 .* 6 ./ P.framerate ;
+
 % Table of states. Each row defines a state. Column order is: state name;
 % timeout duration; next state after timeout or max repetitions; wait event
 % list; next state(s) after wait event(s), latter two are string or cell of
@@ -363,17 +315,16 @@ MAXREP_GETFIX  = 100 ;
 % code, and time zero state handle are automatically generated; only
 % include additional args.
 STATE_TABLE = ...
-{           'Start' , 5000 , 'Ignored'        ,     'FixIn' , 'HoldFix' , { 'Stim' , { P.Fix } , 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] } , 'Photodiode' , 'off' , 'Reset' , P.Waiting } ;
-          'HoldFix' ,  300 , 'Wait'           ,    'FixOut' , 'GetFix' , { 'StimProp' , { P.Fix , 'faceColor' , [ 255 , 255 , 255 ] } } ;
-             'Wait' ,WaitMs, 'TargetOn'       ,  { 'FixOut' , 'StartSacc' } , { 'BrokenFix' , 'FalseAlarmSaccade' } , [ { 'Reset' , [ P.StartSacc , P.EndSacc , P.BlinkStart , P.BlinkEnd , P.FalseAlarmFlag ] , 'Trigger' , P.Waiting , 'Photodiode' , 'on' , 'Stim' , { FixMask , BackFlic } } , WaitBak ] ;
-     'BarOn' ,ReacTimeMinMs, 'ResponseWindow' ,  { 'FixOut' , 'StartSacc' } , { 'BrokenFix' , 'FalseAlarmSaccade' } , { 'Stim' , { Target } , 'Photodiode' , 'off' , 'RunTimeVal' , P.RTstart } ;
-           'GetFix' , 5000 , 'Ignored'        ,     'FixIn' , 'HoldFix' , { 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] } } ;
-          'Ignored' ,    0 , 'cleanUp'        , {} , {} , {} ;
-            'Blink' , 5000 , 'cleanUp'        , 'BlinkEnd' , 'cleanUp' , {} ;
-        'BrokenFix' ,    0 , 'cleanUp'        , {} , {} , {} ;
-    'EyeTrackError' ,    0 , 'cleanUp'        , {} , {} , {} ; 
-          'Correct' ,    0 , 'cleanUp'        , {} , {} , { 'Reward' , v.Reward_Correct } ;
-          'cleanUp' ,    0 , 'final'          , {} , {} , { 'Photodiode' , 'off' , 'Background' , cfg.BackgroundRGB , 'Stim' , { P.ItiStim.current } , 'StimProp' , { P.Fix , 'visible' , false , Target , 'visible' , false , BackFlic , 'visible' , false , FixMask , 'visible' , false } } ;
+{       'Start' ,     5000 , 'Ignored' ,  'FixIn' , 'HoldFix' , { 'Stim' , { P.Fix } , 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] , P.Fix , 'lineColor' , [ 255 , 255 , 255 ] } , 'Photodiode' , 'on' , 'Reset' , P.StimServerAnimationDone } ;
+      'HoldFix' ,      300 , 'Wait'    ,  { 'FixOut' , 'BlinkStart' } , { 'GetFix' , 'Blink' } , { 'StimProp' , { P.Fix , 'faceColor' , [ 255 , 255 , 255 ] , P.Fix , 'lineColor' , [ 000 , 000 , 000 ] } , 'Reset' , [ P.BlinkStart , P.BlinkEnd ] } ;
+         'Wait' ,BaselineMs, 'BarOn'   ,  { 'FixOut' , 'BlinkStart' } , { 'BrokenFix' , 'Blink' } , {} ;
+        'BarOn' ,   BarTime, 'Correct' ,  { 'FixOut' , 'BlinkStart' , 'StimServerAnimationDone' } , { 'BrokenFix' , 'Blink' , 'Correct' } , { 'Stim' , { P.Bar } , 'Photodiode' , 'off' } ;
+       'GetFix' ,     5000 , 'Ignored' ,  'FixIn' , 'HoldFix' , { 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] , P.Fix , 'lineColor' , [ 255 , 255 , 255 ] } } ;
+      'Ignored' ,        0 , 'cleanUp' , {} , {} , {} ;
+        'Blink' ,     5000 , 'cleanUp' , 'BlinkEnd' , 'cleanUp' , {} ;
+    'BrokenFix' ,        0 , 'cleanUp' , {} , {} , {} ;
+      'Correct' ,        0 , 'cleanUp' , {} , {} , { 'Reward' , rew } ;
+      'cleanUp' ,        0 , 'final'   , {} , {} , { 'Photodiode' , 'on' , 'StimProp' , { P.Fix , 'visible' , false , P.Bar , 'visible' , false } } ;
 } ;
 
 % Error check first trial, make sure that there is an event marker for
@@ -459,22 +410,14 @@ createTrial( 'Start' , states{ : } )
 
 % Output to message log
 EchoServer.Write( [ '\n%s Start trial %d, cond %d, block %d(%d)\n' , ...
-  '%9sWait %dms = %d + %d\n' ] , datestr( now , 'HH:MM:SS' ) , ...
+  'Direction %d deg\n' ] , datestr( now , 'HH:MM:SS' ) , ...
     TrialData.currentTrial , TrialData.currentCondition , ...
-      TrialData.currentBlock , v.BlockType , '' , ceil( WaitMs ) , ...
-        ceil( BaselineMs ) , ceil( v.WaitMs ) )
+      TrialData.currentBlock , v.BlockType , c.DirectionDeg )
 
 
 %%% Complete previous trial's inter-trial-interval %%%
 
 sleep( ItiMinMs  -  1e3 * toc( P.ITIstart.value ) )
-
-% Destroy any ITI stimulus and set previous to empty, in case the current
-% trial has no ITI stimulus
-if  ~ isempty( P.ItiStim.previous )
-  delete( P.ItiStim.previous )
-  P.ItiStim.previous = [ ] ;
-end
 
 
 %%% --- SCRIPT FUNCTIONS --- %%%
@@ -589,71 +532,4 @@ function  I = Weber( c , Ib )
   I = min( I , double( intmax( 'uint8' ) ) ) ;
   
 end % Weber
-
-
-% Sample target location and size. Update editable variables. Input args
-% include task script persistent variables and current value of editable
-% variables.
-function  [ v , RfXDeg , RfYDeg , RfRadDeg ] = newtarget( P , v )
-  
-  % Safeguard against infinite loop
-  counter = 0 ;
-  
-  % Half of screen size in degrees
-  hdegs = P.screendegs ./ 2 ;
-  
-  % Sample appropriate target location
-  while  counter < 1e4
-    
-    % Generate cartesian coordinate in degrees from fixation point
-    xy = P.screendegs .* rand( 1 , 2 )  -  hdegs ;
-    
-    % Round to nearest hundredth
-    xy = round( xy , 2 ) ;
-    
-    % Eccentricity of point
-    ecc = sqrt( sum( xy .^ 2 ) ) ;
-    
-    % RF centre radius, according to linear fit from Cavanaugh, Bair,
-    % Movshon. 2002. J Neurophys. 88:2530-2546.
-    rad = ( 0.0456 * ecc + 0.997 ) / 2 ;
-    
-    % Round to nearest hundreth
-    rad = round( rad , 2 ) ;
-    
-    % Sampled RF centre must be a full RF radius away from fixation window
-    % and also a full RF radius away from monitor edges. If not then
-    % resample target location.
-    if  ecc >= v.FixTolDeg + rad  &&  all( rad <= hdegs - abs( xy ) )
-      break
-    end
-    
-  end % sample targ location
-  
-  % Assign values
-  v.RfXDeg = xy( 1 ) ;  v.RfYDeg = xy( 2 ) ;  v.RfRadDeg = rad ;
-  
-  % Re-assign workspace variables of same name
-    RfXDeg = v.RfXDeg   ;
-    RfYDeg = v.RfYDeg   ;
-  RfRadDeg = v.RfRadDeg ;
-  
-  % Fetch ARCADE session behavioural store 
-  BHVstore = SGLBehaviouralStore.launch ;
-  
-  % Editable variable names
-  nam = BHVstore.cfg.EditableVariables( : , 1 ) ;
-  
-  % Editable variables to update
-  for  E = { 'RfXDeg' , 'RfYDeg' , 'RfRadDeg' } , e = E{ 1 } ;
-    
-    % Find location in table
-    i = strcmp( nam , e ) ;
-    
-    % Update value
-    BHVstore.cfg.EditableVariables{ i , 2 } = num2str( v.( e ) ) ;
-    
-  end % editable variables
-  
-end % newtarget
 
