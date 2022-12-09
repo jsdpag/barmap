@@ -101,6 +101,10 @@ if  TrialData.currentTrial == 1
   % Make tic time measurement at end of previous trial for ITI measure
   P.ITIstart = StateRuntimeVariable ;
   
+  % Initialise ARCADE and Task connection to Synapse server on TDT HostPC
+  P.syn = initsynapse( cfg , TdtHostPC , TdtExperiment , SpikeBuffer , ...
+    MuaLfpBuffer ) ;
+  
   % Create and initialise behaviour plots
   P.ofig = creatbehavfig( cfg , P.err , P.tab ) ;
   
@@ -172,14 +176,42 @@ end % first trial init
 drawnow
 
 
+%%% CHECK WHETHER BAR MAPPING IS COMPLETE %%%
+
+% We know this if the current block id is different on the previous and the
+% current trials
+if  TrialData.currentTrial > 1  &&  diff( pre.blocks( end - 1 : end ) )
+  
+  % Wait for user to examine online plot
+  waitfor( ...
+    msgbox( [ '\fontsize{14}Bar mapping is complete.' , newline , ...
+                             'Please examine RF map.' , newline , ...
+                            'Click OK when finished.' ] , ...
+      'Bar Mapping' , 'none' , struct( 'WindowStyle' , 'non-modal' , ...
+        'Interpreter' , 'tex' ) ) )
+  
+  % We will end the running ARCADE session
+  requestQuitSession ;
+  
+  % Make a dummy trial with one state the ends immediately
+  done = State( 'done' ) ;
+  createTrial( 'done' , done ) ;
+  
+  % Run trial and end session
+  return
+  
+end % bar mapping is complete
+
+
 %%% Trial variables %%%
 
 % Error check editable variables
 v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
   BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
     BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
-      TdtExperiment , TdtChannels , SpikeBuffer , MuaLfpBuffer , ...
-        VisualLatencyMs , EnableFB128 , SynthRfXywDeg ) ;
+      TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
+        MuaLfpStartIndex , MuaBuffer , LfpBuffer , VisualLatencyMs , ...
+          StimRespSim , SynthRfXywDeg ) ;
 
 % Record pixels per degree, computed locally
 v.pixperdeg = P.pixperdeg ;
