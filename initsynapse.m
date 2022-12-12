@@ -1,18 +1,25 @@
 
-function  syn = initsynapse( cfg , TdtHostPC , TdtExperiment , varargin )
+function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
+  TdtExperiment , varargin )
 % 
-% syn = initsynapse( cfg , TdtHostPC , TdtExperiment , <Gizmo names> )
+% syn = initsynapse( cfg , evm , err , TdtHostPC , TdtExperiment , 
+%                    <Gizmo names> )
 % 
 % Run this function during ARCADE session and task initialisation to
 % establish a link with the Synapse server that runs on the TDT Host PC.
 % Input arguments include the session's ArcadeConfig object (from
-% retrieveConfig) and strings naming the Host PC on the network (TdtHostPC)
-% and the expected name of the Synapse experiment (TdtExperiment).
-% Remaining input arguments are strings naming Gizmos that are required.
+% retrieveConfig), a table of trial conditions (tab), struct (evm) of event
+% marker names (fields) and codes (field value), struct (err) of trial
+% error code names (fields) and codes (field value), and strings naming the
+% Host PC on the network (TdtHostPC)  and the expected name of the Synapse
+% experiment (TdtExperiment). Remaining input arguments are strings naming
+% Gizmos that are required.
 % 
 % Makes sure that Synapse is set with the correct experiment and subject
 % names. Checks for named Gizmos. Also makes sure that Synapse is in a
-% run-time mode.
+% run-time mode. Generates ARCADE session header and sends to Synapse as
+% run-time note; these include information about the setup, the event
+% markers, and error codes.
 % 
 % Returns empty [ ] if TdtHostPC is 'none'.
 % 
@@ -83,7 +90,10 @@ function  syn = initsynapse( cfg , TdtHostPC , TdtExperiment , varargin )
   if  nargin > NFIXARG
     
     % Check for missing named Gizmos
-    missing = ~ ismember( vararg , iget( syn , getGizmoNames ) ) ;
+    missing = ~ ismember( varargin , iget( syn , getGizmoNames ) ) ;
+    
+    % A Gizmo is not missing if the name is 'none'
+    missing = missing  &  ~ strcmpi( varargin , 'none' ) ;
     
     % There are missing Gizmos
     if  any( missing )
@@ -105,6 +115,52 @@ function  syn = initsynapse( cfg , TdtHostPC , TdtExperiment , varargin )
       'Please put Synapse into a run-time mode.' )
     
   end % run-time mode
+  
+  
+  %-- ARCADE session header --%
+  
+  % Tell cellfun to return cell array
+  uof = { 'UniformOutput' , false } ;
+  
+  % Cell array of strings containing names of ArcadeConfig properties to
+  % include in header
+  C = { 'Experiment' , 'Experimenter' , 'ProjectOwner' , 'Subject' , ...
+    'Session' , 'sessionName' , 'DistanceToScreen' , ...
+      'MonitorDiagonalSize' , 'PixelsPerDegree' , 'MonitorRefreshRate' ,...
+        'BackgroundRGB' } ;
+  
+  % First block of lines in header with session parameters
+  hdr = cellfun( @( c ) val2str( cfg.( c ) ) , C , uof{ : } ) ;
+  
+  % Extract screen size
+  hdr = [ hdr , ...
+    { [ 'MonitorWidthPixels '  , cfg.MonitorResolution.width  ] , ...
+      [ 'MonitorHeightPixels ' , cfg.MonitorResolution.height ] } ] ;
+  
+  % Fetch editable variable names and values
+  C = cfg.EditableVariables( : , 1 : 2 )' ;
+  
+  % Add editable variables
+  hdr = [ hdr , { sprintf( 'Editable variables %d' , size( C , 2 ) ) } ,...
+    cellfun( @( v , x ) [ v , ' ' , x ] , C( 1 , : ) , C( 2 , : ) , ...
+      uof{ : } )' ] ;
+  
+  % Event marker names
+  C = fieldnames( evm )' ;
+  
+  % Add marker names and values
+  hdr = [ hdr , { sprintf( 'Event markers %d' , numel( C ) ) } , ...
+    cellfun( @( c ) sprintf( '%s %d' , c , evm.( c ) ) , C , uof{ : } ) ] ;
+  
+  % Error codes
+  
+  % Table 2 string
+  
+  % Send synapse api runtime note
+  
+  hdr = [ { 'ARCADE session header start' } , ...
+            cell2mat( @( f ) , [ f , ' ' , cfg.( f ) ] ,  )
+            { 'ARCADE session header end' } ] ;
   
   
 end % initsynapse
@@ -142,4 +198,18 @@ function  i = iget( syn , fnam )
   end
   
 end % iget
+
+
+% Convert matrix to string or return string
+function  str = val2str( val )
+  
+  % Already a string, return that. Otherwise, convert numeric matrix to
+  % string.
+  if  ischar( val )
+    str = val ;
+  else
+    str = mat2str( val ) ;
+  end
+  
+end % val2str
 

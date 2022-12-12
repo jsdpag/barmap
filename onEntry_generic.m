@@ -93,7 +93,19 @@ function  onEntry_generic( a )
   EchoServer.Write( sprintf( '%s %s\n%s' , ts , a.State.name , rs ) ) ;
   
   % Register trial error code on current trial
-  if  flg.TrialError , trialerror( a.TrialError ) , end
+  if  flg.TrialError
+    
+    trialerror( a.TrialError )
+    
+    % SynapseAPI is live, send a run-time note with the trial outcome
+    if  a.synflg && a.syn.setParameterValue( 'RecordingNotes' , 'Note' ,...
+          sprintf( 'Outcome %s\n' , a.TrialError ) )
+        
+      error( 'Failed to deliver run-time note to Synapse: Outcome %s' , ...
+        a.TrialError )
+      
+    end
+  end % Trial error code
   
   % *_start event marker
   if  flg.Marker_start , eventmarker( a.Marker_start ) ; end

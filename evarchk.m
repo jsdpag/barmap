@@ -2,7 +2,7 @@
 function  v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
   BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
     BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
-      TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
+      TdtExperiment , LaserCtrl , TdtChannels , SpikeBuffer , ...
         MuaStartIndex , MuaBuffer , VisualLatencyMs , StimRespSim , ...
           SynthRfXywDeg )
 % 
@@ -27,7 +27,7 @@ function  v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
   lim.ItiMinMs = [ 0 , +Inf ] ;
   lim.TdtHostPC = { } ;
   lim.TdtExperiment = { } ;
-  lim.LaserController = { } ;
+  lim.LaserCtrl = { } ;
   lim.TdtChannels = [ 1 , 32 ] ;
   lim.SpikeBuffer = { } ;
   lim.MuaStartIndex = [ 1 , 32 ] ;
@@ -50,7 +50,7 @@ function  v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
   v.ItiMinMs = ItiMinMs ;
   v.TdtHostPC = TdtHostPC ;
   v.TdtExperiment = TdtExperiment ;
-  v.LaserController = LaserController ;
+  v.LaserCtrl = LaserCtrl ;
   v.TdtChannels = TdtChannels ;
   v.SpikeBuffer = SpikeBuffer ;
   v.MuaStartIndex = MuaStartIndex ;

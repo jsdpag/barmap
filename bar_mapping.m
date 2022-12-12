@@ -34,9 +34,12 @@ global  ARCADE_BLOCK_SELECTION_GLOBAL ;
 v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
   BarWidthHightDeg , BarSpeedDegPerSec , BarRGB , FixTolDeg , ...
     BaselineMs , RewardMinMs , ScreenGamma , ItiMinMs , TdtHostPC , ...
-      TdtExperiment , LaserController , TdtChannels , SpikeBuffer , ...
+      TdtExperiment , LaserCtrl , TdtChannels , SpikeBuffer , ...
         MuaStartIndex , MuaBuffer , VisualLatencyMs , StimRespSim , ...
           SynthRfXywDeg ) ;
+
+% Retrieve persistent data
+P = persist ;
 
 
 %%% FIRST TRIAL INITIALISATION -- PERSISTENT DATA %%%
@@ -73,6 +76,9 @@ if  TrialData.currentTrial == 1
   P.pixperdeg = ( cfg.DistanceToScreen * tand( 1 ) )  *  ...
     ( sqrt( sum( P.screensize .^ 2 ) ) / cfg.MonitorDiagonalSize ) ;
   
+    % Rectify this wrong
+    cfg.PixelsPerDegree = P.pixperdeg ;
+  
   % Screen size in degrees
   P.screendegs = P.screensize ./ P.pixperdeg ;
   
@@ -89,9 +95,6 @@ if  TrialData.currentTrial == 1
   P.Motion = LinearMotion( BarSpeedDegPerSec .* P.pixperdeg , [0 0 0 0] ) ;
   
     P.Motion.terminalAction = '00001101' ;
-  
-  % Ideal duration of one sweep by the bar, in milliseconds
-  P.sweeptime = TravelDiameterDeg ./ BarSpeedDegPerSec .* 1e3 ;
     
   % Create gaze fixation stimulus
   P.Fix = Circle ;
@@ -111,21 +114,110 @@ if  TrialData.currentTrial == 1
   % Make tic time measurement at end of previous trial for ITI measure
   P.ITIstart = StateRuntimeVariable ;
   
+  % Ideal duration of one sweep by the bar, in milliseconds
+  P.sweeptime = TravelDiameterDeg ./ BarSpeedDegPerSec .* 1e3 ;
+  
+  % Extra time that we add to bar sweep when computing state durations and
+  % buffer sizes. Unit in milliseconds. Accounts for variability in exact
+  % bar + motion onset due to temporal granularity of monitor refresh rate.
+  P.extratime = 6 ./ P.framerate .* 1e3 ; % frames
+  
   % Initialise connection to Synapse server on TDT HostPC
-  P.syn = initsynapse( cfg , TdtHostPC , TdtExperiment , ...
-    LaserController , SpikeBuffer , MuaBuffer , StimRespSim ) ;
+  P.syn = initsynapse( cfg , P.tab , P.evm , P.err , TdtHostPC , ...
+    TdtExperiment , LaserCtrl , SpikeBuffer , MuaBuffer , StimRespSim ) ;
   
     % Create a logical flag that is raised when synapse is in use
     P.UsingSynapse = ~ isempty( P.syn ) ;
+    
+  % Set up SynapseAPI environment if available
+  if  P.UsingSynapse
   
-  % Create and initialise behaviour plots
-  P.ofig = creatbehavfig( cfg , P.err , P.tab ) ;
+    % Create a LaserController MATLAB object for setting parameter values of
+    % the named LaserController Gizmo
+    P.laserctrl = LaserController( P.syn , LaserCtrl ) ;
+
+      % Set fixed parameters for remainder of bar mapping session
+      P.laserctrl.EventIntOn = P.evm.BarOn_entry ;
+      P.laserctrl.EventIntReset = P.evm.cleanUp_entry ;
+      P.laserctrl.EventIntRstOpt = P.evm.BarOn_end ;
+      P.laserctrl.UseLaser = false ;
+      P.laserctrl.UsePhotodiode = true ;
+      P.laserctrl.PhotodiodeThreshold = 0.67 ;
+      P.laserctrl.PhotodiodeDirectionStr = 'falling' ;
+      P.laserctrl.PhotodiodeTimeLow = 4 ;
+      P.laserctrl.Enablemanual = false ;
+
+    % Create triggered buffer MATLAB objects
+    P.buf.spk = TdtWinBuf( syn , SpikeBuffer ) ;
+    P.buf.mua = TdtWinBuf( syn ,   MuaBuffer ) ;
+
+      %- Set fixed buffer parameters -%
+
+      % Buffer size grabs baseline waiting period + expected time to
+      % complete one sweep of the bar. Plus a few frames of the stimulus
+      % monitor. And also expected visual latency.
+      secs = ...
+        ( BaselineMs + VisualLatencyMs + P.sweeptime + P.extratime ) / 1e3;
+
+      % For spike buffer, assume no unit will generate above 1000spk/sec.
+      P.buf.spk.setbufsiz( secs , 1000 ) ;
+      P.buf.mua.setbufsiz( secs ) ;
+
+      % Response window contains only visual latency plus bar sweep time
+      % and half the extra time.
+      secs = ( VisualLatencyMs + P.sweeptime + P.extratime / 2 ) / 1e3 ;
+
+      % Again, assume no spike rate above 1000spk/sec
+      P.buf.spk.setrespwin( secs , 1000 ) ;
+      P.buf.mua.setrespwin( secs ) ;
+
+      % Maximum number of channels to return following each buffer read
+      P.buf.spk.setchsubsel( min( P.buf.spk.maxchan , TdtChannels ) ) ;
+      P.buf.mua.setchsubsel( min( P.buf.mua.maxchan , TdtChannels ) ) ;
+
+      % Crop buffered data in specified time window around trigger event
+      secs = [ - BaselineMs , VisualLatencyMs + P.sweeptime ] / 1e3 ;
+      P.buf.spk.settimewin( secs ) ;
+      P.buf.mua.settimewin( secs ) ;
+
+    % Simulated ephys signal modulation via FB128 Sync line is enabled
+    P.simresp = ~ strcmpi( StimRespSim , 'none' ) ;
+
+      % Set up StimRespSim Gizmo
+      if  P.simresp
+
+        % Try to enable the FB128 sync line
+        iset( P.syn , StimRespSim , 'Enable' , 1 )
+
+        % Duration of response to bar is the time that it takes for the bar
+        % to sweep across the RF, in milliseconds
+        iset( P.syn , StimRespSim , 'ResponseMs' , ...
+          SynthRfXywDeg( 3 ) / BarSpeedDegPerSec * 1e3 )
+
+      else
+
+        % Try to disable the FB128 sync line
+        iset( P.syn , StimRespSim , 'Enable' , 0 )
+
+      end % set StimRespSim Giz
+
+    % Create and initialise behaviour plots
+    P.ofig = creatbehavfig( cfg , P.err , P.tab ) ;
   
-% All subsequent trials
-else
+  % Not using SynapseAPI, set default values
+  else
+    
+    P.simresp = false ;
+    
+  end % synapse api actions
   
-  % Retrieve persistent data
-  P = persist ;
+% All subsequent trials, if SynapseAPI enabled and the previous trial ended
+% as 'Correct'
+elseif  P.UsingSynapse  &&  pre.trialError( end - 1 ) == P.err.Correct
+  
+  % Grab the buffered data
+  P.buf.spk.getdata( ) ;
+  P.buf.mua.getdata( ) ;
   
   %-- Update behaviour plots based on previous trial --%
   
@@ -198,6 +290,10 @@ if  TrialData.currentTrial > 1  &&  diff( pre.blocks( end - 1 : end ) )
   % Wait for user to examine online plot
   waitforuser( 'Bar Mapping' , 14 , ...
     'Bar mapping is complete.\nPlease examine RF map.' )
+  
+  % Explicitly release resources
+  delete( P.laserctrl ) , delete( P.Bar      ) , delete( P.Fix )
+  delete( P.Motion    ) , delete( P.ITIstart )
   
   % We will end the running ARCADE session
   requestQuitSession ;
@@ -285,24 +381,52 @@ P.Motion.vertices = vpix.TravelDiameterDeg / 2  *  P.Motion.vertices ;
 P.Motion.vertices = P.Motion.vertices  +  vpix.BarOriginDeg([1 2 1 2]) ;
 
 
+%%% Simulated responses with FB128 %%%
+
+% Simulation mode is enabled
+if  P.simresp
+  
+  % Determine the vector from starting point of the bar to the centre of
+  % the simulated RF
+  vsim = SynthRfXywDeg( 1 : 2 ) - P.Motion.vertices( 1 : 2 ) ;
+  
+  % Project this onto the unit direction vector of the current trial
+  vsim = vsim * [ cosd( c.DirectionDeg ) ;
+                  sind( c.DirectionDeg ) ] ;
+	
+	% Compute the time it takes for the bar to reach the edge of the RF, plus
+	% visual latency. In milliseconds.
+  iset( P.syn , StimRespSim , 'LatencyMs' , ...
+    vsim / BarSpeedDegPerSec * 1e3  +  VisualLatencyMs )
+  
+end % simulation
+
+
 %%% DEFINE TASK STATES %%%
 
 % Special actions executed when state is finished executing. Remember to
 % make this a column vector of cells.
-  
+
   % cleanUp measures time that inter-trial-interval starts, then prints one
   % final message to show that all State objects have finished executing
   % and that control is returning to ARCADE's inter-trial code.
   ENDACT.cleanUp = ...
     { @( ) P.ITIstart.set_value( tic ) ;
       @( ) EchoServer.Write( 'End trial %d\n' , TrialData.currentTrial ) };
+    
+    % SynapseAPI is live, send run-time note about end of trial
+    if  P.UsingSynapse
+      ENDACT.cleanUp{ end + 1 } = @( ) P.syn.setParameterValue( ...
+        'RecordingNotes' , 'Note' , sprintf( 'End trial %d\n' , ...
+          TrialData.currentTrial ) ) ;
+    end
 
 % Special constants for value of max reps
 MAXREP_DEFAULT = 2 ;
 MAXREP_GETFIX  = 100 ;
 
 % BarOn timout is the ideal sweep time plus several frames
-BarTime = P.sweeptime  +  1e3 .* 6 ./ P.framerate ;
+BarTime = P.sweeptime  +  P.extratime ;
 
 % Table of states. Each row defines a state. Column order is: state name;
 % timeout duration; next state after timeout or max repetitions; wait event
@@ -372,6 +496,12 @@ for  row = 1 : size( STATE_TABLE , 1 )
   % onEntry input arg struct
   a = onEntry_args( entarg{ : } ) ;
   
+  % Default value, no SynapseAPI object is available
+  a.synflg = P.UsingSynapse ;
+  
+  % SynapseAPI is not empty, so add pointer to this in the arg struct
+  if  P.UsingSynapse , a.syn = P.syn ; end
+  
   % Define state's onEntry actions
   states.( name ).onEntry = { @( ) onEntry_generic( a ) } ;
   
@@ -407,9 +537,14 @@ createTrial( 'Start' , states{ : } )
 
 % Output to message log
 EchoServer.Write( [ '\n%s Start trial %d, cond %d, block %d(%d)\n' , ...
-  'Direction %d deg\n' ] , datestr( now , 'HH:MM:SS' ) , ...
+  'Direction %d deg (%d/%d)\n' ] , datestr( now , 'HH:MM:SS' ) , ...
     TrialData.currentTrial , TrialData.currentCondition , ...
-      TrialData.currentBlock , v.BlockType , c.DirectionDeg )
+      TrialData.currentBlock , v.BlockType , c.DirectionDeg , ...
+        ARCADE_BLOCK_SELECTION_GLOBAL.count.trials , ...
+          ARCADE_BLOCK_SELECTION_GLOBAL.count.total )
+
+% Resume cyclical buffering of ephys signals
+if  P.UsingSynapse , P.buf.spk.startbuff( ) ; P.buf.mua.startbuff( ) ; end
 
 
 %%% Complete previous trial's inter-trial-interval %%%
@@ -423,6 +558,9 @@ sleep( ItiMinMs  -  1e3 * toc( P.ITIstart.value ) )
 function  pout = persist( pin )
   
   persistent  p
+  
+  % First use
+  if  isempty( p ) , p = struct ; end
   
   if  nargin  ,  p = pin ; end
   if  nargout , pout = p ; end
@@ -529,4 +667,20 @@ function  I = Weber( c , Ib )
   I = min( I , double( intmax( 'uint8' ) ) ) ;
   
 end % Weber
+
+
+% Try to send information from SynapseAPI object. Raise error on failure.
+% Scalar parameters, only.
+function  iset( syn , giz , par , val )
+  
+  % Try to set value of Gizmo parameter
+  if  syn.setParameterValue( giz , par , val )
+    
+    % Throw a simple, reader-friendly error message.
+    error( [ 'Failed to set parameter %s of Gizmo %s through ' , ...
+      'Synapse server on Host: %s' ] , par , giz , syn.SERVER )
+    
+  end % failed to set
+  
+end % iset
 
