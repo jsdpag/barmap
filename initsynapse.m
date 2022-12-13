@@ -153,15 +153,36 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
     cellfun( @( c ) sprintf( '%s %d' , c , evm.( c ) ) , C , uof{ : } ) ] ;
   
   % Error codes
+  C = fieldnames( err )' ;
+  
+  % Add error names and codes
+  hdr = [ hdr , { sprintf( 'Error codes %d' , numel( C ) ) } , ...
+    cellfun( @( c ) sprintf( '%s %d' , c , evm.( c ) ) , C , uof{ : } ) ] ;
   
   % Table 2 string
+  C = cellfun( @val2str , table2cell( tab ) , uof{ : } ) ;
+  
+    % Add column names
+    C = [ tab.Properties.VariableNames ; C ] ;
+
+    % Produce comma-separated values
+    C = cellfun( @( c ) strjoin( c , ',' ), num2cell( C , 2 ), uof{ : } )';
+    
+    % Add trial condition table
+    hdr = ...
+      [ hdr , { sprintf( 'Trial condition table %d' , numel( C ) ) } , C ];
+  
+  % Mark start and end of session header
+  hdr = [ { 'ARCADE session header start' } , hdr , ...
+          { 'ARCADE session header end'   } ] ;
+
+	% Combine into one string
+  hdr = strjoin( hdr , '\n' ) ;
   
   % Send synapse api runtime note
-  
-  hdr = [ { 'ARCADE session header start' } , ...
-            cell2mat( @( f ) , [ f , ' ' , cfg.( f ) ] ,  )
-            { 'ARCADE session header end' } ] ;
-  
+  if  syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
+    error( 'Failed to deliver session header to Synapse.' )
+  end
   
 end % initsynapse
 

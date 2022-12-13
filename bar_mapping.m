@@ -131,7 +131,7 @@ if  TrialData.currentTrial == 1
     
   % Set up SynapseAPI environment if available
   if  P.UsingSynapse
-  
+    
     % Create a LaserController MATLAB object for setting parameter values of
     % the named LaserController Gizmo
     P.laserctrl = LaserController( P.syn , LaserCtrl ) ;
@@ -171,9 +171,13 @@ if  TrialData.currentTrial == 1
       P.buf.spk.setrespwin( secs , 1000 ) ;
       P.buf.mua.setrespwin( secs ) ;
 
+      % Minimum number of channels
+      minchan = ...
+        min( [ P.buf.spk.maxchan , P.buf.mua.maxchan , TdtChannels ] ) ;
+      
       % Maximum number of channels to return following each buffer read
-      P.buf.spk.setchsubsel( min( P.buf.spk.maxchan , TdtChannels ) ) ;
-      P.buf.mua.setchsubsel( min( P.buf.mua.maxchan , TdtChannels ) ) ;
+      P.buf.spk.setchsubsel( minchan ) ;
+      P.buf.mua.setchsubsel( minchan ) ;
 
       % Crop buffered data in specified time window around trigger event
       secs = [ - BaselineMs , VisualLatencyMs + P.sweeptime ] / 1e3 ;
@@ -201,8 +205,8 @@ if  TrialData.currentTrial == 1
 
       end % set StimRespSim Giz
 
-    % Create and initialise behaviour plots
-    P.ofig = creatbehavfig( cfg , P.err , P.tab ) ;
+    % Create and initialise receptive field plots
+    P.ofig = creatRFfig( cfg , v , P.tab , minchan ) ;
   
   % Not using SynapseAPI, set default values
   else
@@ -369,10 +373,10 @@ P.Bar.play_animation( P.Motion ) ;
 
 % Create unit direction vectors. First points to bar's starting position.
 % Second points to end position.
-P.Motion.vertices( 1 ) = cosd( c.DirectionDeg + 180 ) ;
-P.Motion.vertices( 2 ) = sind( c.DirectionDeg + 180 ) ;
-P.Motion.vertices( 3 ) = cosd( c.DirectionDeg + 000 ) ;
-P.Motion.vertices( 4 ) = sind( c.DirectionDeg + 000 ) ;
+P.Motion.vertices( 1 ) = - cosd( c.DirectionDeg ) ;
+P.Motion.vertices( 2 ) = - sind( c.DirectionDeg ) ;
+P.Motion.vertices( 3 ) = + cosd( c.DirectionDeg ) ;
+P.Motion.vertices( 4 ) = + sind( c.DirectionDeg ) ;
 
 % Scale direction vectors by half of the travel distance
 P.Motion.vertices = vpix.TravelDiameterDeg / 2  *  P.Motion.vertices ;
@@ -542,6 +546,17 @@ EchoServer.Write( [ '\n%s Start trial %d, cond %d, block %d(%d)\n' , ...
       TrialData.currentBlock , v.BlockType , c.DirectionDeg , ...
         ARCADE_BLOCK_SELECTION_GLOBAL.count.trials , ...
           ARCADE_BLOCK_SELECTION_GLOBAL.count.total )
+
+% Trial header
+hdr = sprintf( [ 'Start trial %d\nCondition %d\nBlock %d\n' , ...
+  'Block type %d\nMotion direction deg %d\nReward ms %d' ] , ...
+    TrialData.currentTrial , TrialData.currentCondition , ...
+      TrialData.currentBlock , v.BlockType , c.DirectionDeg , rew ) ;
+    
+  % Send header to Synapse server
+  if  P.syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
+    error( 'Failed to send trial header to Synapse.' )
+  end
 
 % Resume cyclical buffering of ephys signals
 if  P.UsingSynapse , P.buf.spk.startbuff( ) ; P.buf.mua.startbuff( ) ; end
