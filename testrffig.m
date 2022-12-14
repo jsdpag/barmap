@@ -14,14 +14,14 @@ function  new = testrffig( evar , C , motiondir )
   %%% CONSTANTS %%%
   
   % RF radius, degrees
-  rfrad = 1.5 ;
+  rfrad = 0.75 ;
   
   % MUA signal increase over baseline
   muasig = 2 ;
   
   % Spiking baseline and response levels, spikes per ms
   spkbase = 10 / 1e3 ;
-  spkresp = 40 / 1e3 ;
+  spkresp = 60 / 1e3 ;
   
 
   %%% Make data %%%

@@ -410,7 +410,10 @@ end % simulation
 
 % Special actions executed when state is finished executing. Remember to
 % make this a column vector of cells.
-
+  
+  % Guarantee that bar motion animation is stopped
+  ENDACT.BarOn = { @( ) P.Bar.stop_animation( ) } ;
+  
   % cleanUp measures time that inter-trial-interval starts, then prints one
   % final message to show that all State objects have finished executing
   % and that control is returning to ARCADE's inter-trial code.

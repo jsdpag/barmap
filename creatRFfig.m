@@ -43,21 +43,30 @@ function  ofig = creatRFfig( cfg , evar , tab , minchan )
   % Conversion factor, visual degrees per millisecond
   C.degperms = evar.BarSpeedDegPerSec / 1e3 ;
   
-  % Number of complete spatial bins, one per millisecond of the bar sweep
-  C.N.space = C.N.msperbar ;
+  % Target spatial bin width, in degrees. There is considerable time saving
+  % in averaging adjacent ms bins, rather than using full resolution.
+  C.degperbin = 0.04 ;
   
-  % Spatial bin width
-  C.degperbin = C.degperms ;
+  % Milliseconds per spatial bin, round up to next millisecond
+  C.msperbin = ceil( C.degperbin / C.degperms ) ;
   
-  % Enumerate spatial bins along x and y axes, zeroed on fixation point
-  C.x = C.degperbin * ( 0 : C.N.space - 1 ) + ...
+  % Actual spatial bin width
+  C.degperbin = C.degperms * C.msperbin ;
+  
+  % Number of complete spatial bins in one sweep of the bar
+  C.N.space = floor( C.N.msperbar / C.msperbin ) ;
+  
+  % Enumerate spatial bins along x and y axes. Convert from bin edge to bin
+  % centre. First bin aligned to starting point of the bar.
+  C.x = C.degperbin * ( 1 : C.N.space )  -  C.degperbin / 2  +  ...
     ( evar.BarOriginDeg( 1 ) - evar.TravelDiameterDeg / 2 ) ;
-  C.y = C.degperbin * ( 0 : C.N.space - 1 ) + ...
+  C.y = C.degperbin * ( 1 : C.N.space )  -  C.degperbin / 2  +  ...
     ( evar.BarOriginDeg( 2 ) - evar.TravelDiameterDeg / 2 ) ;
   
   % Index of millisecond time bins that will be mapped to visual space.
   % Invert for MATLAB shorthand X( i ) = [ ] to remove selected elements.
-  C.i = ~ ( C.time > evar.VisualLatencyMs ) ;
+  C.i = ~ ( C.time >  evar.VisualLatencyMs & ...
+            C.time <= evar.VisualLatencyMs + C.N.space * C.msperbin ) ;
   
   % Spike train convolution kernel with 20ms time constant, millisecond
   % time bins
@@ -87,7 +96,7 @@ function  ofig = creatRFfig( cfg , evar , tab , minchan )
   %%% Create axes %%%
   
   % Spike train RF map
-  ofig.subplot( 1 , 3 , 1 , 'Tag' , 'spkrf' ) ;
+  ofig.subplot( 1 , 3 , 1 , 'Tag' , 'spkrf' , 'Layer' , 'top' ) ;
   
     axis square tight
     grid on
@@ -96,7 +105,7 @@ function  ofig = creatRFfig( cfg , evar , tab , minchan )
     ylabel( 'Elevation (deg)' )
   
   % MUA RF map
-  ofig.subplot( 1 , 3 , 2 , 'Tag' , 'muarf' ) ;
+  ofig.subplot( 1 , 3 , 2 , 'Tag' , 'muarf' , 'Layer' , 'top' ) ;
   
     axis square tight
     grid on
@@ -156,8 +165,8 @@ function  ofig = creatRFfig( cfg , evar , tab , minchan )
   %-- Make graphics objects --%
   
   % Line properties with or without highlighting
-  prop.hi = { 'LineWidth' , 1.6 , 'Color' , col.green } ;
-  prop.lo = { 'LineWidth' , 0.8 , 'Color' , col.blue  } ;
+  prop.hi = { 'LineWidth' , 1.2 , 'Color' , col.green } ;
+  prop.lo = { 'LineWidth' , 0.6 , 'Color' , col.blue  } ;
   
   % Data modalities
   for  TAG = { 'spk' , 'mua' } , tag = TAG{ 1 } ;
@@ -237,16 +246,17 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
     ch = dat.chsel.Value ;
     
     % Assign RF maps
-    dat.hrf.spk.CData( : , : ) = dat.spk.rf( : , : , ch ) ;
-    dat.hrf.mua.CData( : , : ) = dat.mua.rf( : , : , ch ) ;
+    dat.hrf.spk.CData = dat.spk.rf( : , : , ch ) ;
+    dat.hrf.mua.CData = dat.mua.rf( : , : , ch ) ;
     
     % Assign time series for each direction
     for  i = 1 : dat.C.N.dir
-      dat.hms.spk( i ).YData(:) = dat.spk.time( : , i , ch ) ./ dat.trials;
-      dat.hms.mua( i ).YData(:) = dat.mua.time( : , i , ch ) ./ dat.trials;
+      dat.hms.spk( i ).YData = dat.spk.time( : , i , ch ) ./ dat.trials ;
+      dat.hms.mua( i ).YData = dat.mua.time( : , i , ch ) ./ dat.trials ;
     end
     
-    % Done
+    % Show changes and done
+    drawnow
     return
     
   end % new channel
@@ -320,21 +330,33 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
     % Keep only the time bins from the bar sweep
     X( dat.C.i , : ) = [ ] ;
     
+    % Adjacent ms bins are averaged together to create spatial bins
+    if  dat.C.msperbin > 1
+      
+      % Re-arrange ms bins into groups. Each group of ms bins is a column.
+      % Group elements span rows. Channels extend along dim 3.
+      X = reshape( X , dat.C.msperbin , dat.C.N.space , dat.C.N.chan  ) ;
+      
+      % Average of adjacent ms bins to produce spatial bins
+      X = mean( X , 1 ) ;
+      
+      % Put bins back across rows, and channels back across columns
+      X = permute( X , [ 2 , 3 , 1 ] ) ;
+      
+    end % average adjacent ms bins
+    
     % Accumulate backprojection of responses over time into visual space,
-    % for each channel
-    for  ch = 1 : dat.C.N.chan
-      dat.( tag ).rf( : , : , ch ) = dat.( tag ).rf( : , : , ch ) + ...
-        backproj( X( : , ch ) , motiondir , 'yx' ) ;
-    end
+    % for each channel. RF map axes will have YDir as 'normal' so use 'yx'.
+    dat.( tag ).rf = dat.( tag ).rf  +  backproj( X , motiondir , 'yx' ) ;
     
     % Currently selected channel
     ch = dat.chsel.Value ;
     
     % Update RF map
-    dat.hrf.( tag ).CData( : , : ) = dat.( tag ).rf( : , : , ch ) ;
+    dat.hrf.( tag ).CData = dat.( tag ).rf( : , : , ch ) ;
     
     % And update time series line with running average
-    dat.hms.( tag )( idir ).YData( : ) = ...
+    dat.hms.( tag )( idir ).YData = ...
       dat.( tag ).time( : , idir , ch )  ./  dat.trials ;
     
     % No direction change, done
@@ -343,6 +365,16 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
     % Lower highlighting on old direction line, raise it on new
     set( dat.hms.( tag )( iold ) , dat.prop.lo{ : } )
     set( dat.hms.( tag )( idir ) , dat.prop.hi{ : } )
+    
+    % Logical index vector that locates new direction's line
+    h = false( size( dat.hms.( tag ) ) ) ;
+    h( idir ) = true ;
+    
+    % Parent axis of time series
+    ax = dat.hms.( tag )( idir ).Parent ;
+    
+    % Draw new direction's line on top of all others
+    ax.Children = [ dat.hms.( tag )( h ) ; dat.hms.( tag )( ~h ) ] ;
     
   end % data modalities
   
