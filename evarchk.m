@@ -99,7 +99,7 @@ function  v = evarchk( Reward , BarOriginDeg , TravelDiameterDeg , ...
       error( '%s must be of type double' , n )
       
     % Check numeric variable is within acceptable limits
-    elseif  v.( n ) < lim.( n )( 1 )  ||  v.( n ) > lim.( n )( 2 )
+    elseif  any(  v.( n ) < lim.( n )( 1 )  |  v.( n ) > lim.( n )( 2 )  )
       
       error( '%s must be within inclusive range [ %.3f , %.3f ]' , ...
         n , lim.( n ) )

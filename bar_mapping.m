@@ -87,7 +87,7 @@ if  TrialData.currentTrial == 1
   
     P.Bar.width  = BarWidthHightDeg( 1 ) .* P.pixperdeg ;
     P.Bar.height = BarWidthHightDeg( 2 ) .* P.pixperdeg ;
-    P.Bar.faceColor( : ) = 2 ^ 8 - 1 ;
+    P.Bar.faceColor( : ) = BarRGB ;
     P.Bar.drawMode = 1 ;
     P.Bar.visible = 0 ;
   
@@ -101,18 +101,22 @@ if  TrialData.currentTrial == 1
   
     % Parameters are fixed
     P.Fix.position = [ 0 , 0 ] ;
-    P.Fix.faceColor( : ) = BarRGB ;
-    P.Fix.lineColor( : ) = BarRGB ;
+    P.Fix.faceColor( : ) = 2 ^ 8 - 1 ;
+    P.Fix.lineColor( : ) = 2 ^ 8 - 1 ;
     P.Fix.lineWidth = 1 ;
     P.Fix.drawMode = 3 ;
     P.Fix.diameter = 0.15 * P.pixperdeg ;
     
     % Fixation window tolerance. Use this to detect if the value has
-    % changed beteween trials.
-    P.FixTol = [ ] ;
+    % changed beteween trials. Initialisation value guarantees that new
+    % fixation window will be made on first trial.
+    P.FixTol = NaN ;
   
   % Make tic time measurement at end of previous trial for ITI measure
   P.ITIstart = StateRuntimeVariable ;
+  
+    % Initialise P.ITIstart to zero, so that we don't wait on first trial
+    P.ITIstart.value = zeros( 1 , 'uint64' ) ;
   
   % Ideal duration of one sweep by the bar, in milliseconds
   P.sweeptime = TravelDiameterDeg ./ BarSpeedDegPerSec .* 1e3 ;
@@ -291,13 +295,24 @@ drawnow
 % current trials
 if  TrialData.currentTrial > 1  &&  diff( pre.blocks( end - 1 : end ) )
   
-  % Wait for user to examine online plot
-  waitforuser( 'Bar Mapping' , 14 , ...
-    'Bar mapping is complete.\nPlease examine RF map.' )
+  % Synapse in use
+  if  P.UsingSynapse
+    
+    % Wait for user to examine online plot
+    waitforuser( 'Bar Mapping' , 14 , ...
+      'Bar mapping is complete.\nPlease examine RF map.' )
+    
+    % Explicitly release resources
+    delete( P.laserctrl ) , delete( P.buf.spk ) , delete( P.buf.mua )
+    delete( P.syn )
+  
+  end % synapse
   
   % Explicitly release resources
-  delete( P.laserctrl ) , delete( P.Bar      ) , delete( P.Fix )
-  delete( P.Motion    ) , delete( P.ITIstart )
+  for  E = { 'StimServerAnimationDone' , 'BlinkStart' , 'BlinkEnd' , ...
+      'Bar' , 'Fix' , 'Motion' , 'ITIstart' }
+    delete( P.( E{ 1 } ) ) ;
+  end
   
   % We will end the running ARCADE session
   requestQuitSession ;
@@ -550,19 +565,24 @@ EchoServer.Write( [ '\n%s Start trial %d, cond %d, block %d(%d)\n' , ...
         ARCADE_BLOCK_SELECTION_GLOBAL.count.trials , ...
           ARCADE_BLOCK_SELECTION_GLOBAL.count.total )
 
-% Trial header
-hdr = sprintf( [ 'Start trial %d\nCondition %d\nBlock %d\n' , ...
-  'Block type %d\nMotion direction deg %d\nReward ms %d' ] , ...
-    TrialData.currentTrial , TrialData.currentCondition , ...
-      TrialData.currentBlock , v.BlockType , c.DirectionDeg , rew ) ;
-    
+% Synapse is running
+if  P.UsingSynapse
+  
+  % Trial header
+  hdr = sprintf( [ 'Start trial %d\nCondition %d\nBlock %d\n' , ...
+    'Block type %d\nMotion direction deg %d\nReward ms %d' ] , ...
+      TrialData.currentTrial , TrialData.currentCondition , ...
+        TrialData.currentBlock , v.BlockType , c.DirectionDeg , rew ) ;
+
   % Send header to Synapse server
   if  P.syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
     error( 'Failed to send trial header to Synapse.' )
   end
-
-% Resume cyclical buffering of ephys signals
-if  P.UsingSynapse , P.buf.spk.startbuff( ) ; P.buf.mua.startbuff( ) ; end
+  
+  % Resume cyclical buffering of ephys signals
+  P.buf.spk.startbuff( ) ; P.buf.mua.startbuff( ) ;
+  
+end % synapse running
 
 
 %%% Complete previous trial's inter-trial-interval %%%
@@ -587,7 +607,7 @@ end % persist
 
 
 % Task-specific checks on the validity of trial_condition_table.csv
-function  tab = tabvalchk( tab , cstrreg )
+function  tab = tabvalchk( tab )
   
   % Required columns, the set of column headers
   colnam = { 'DirectionDeg' } ;
@@ -598,18 +618,8 @@ function  tab = tabvalchk( tab , cstrreg )
   % Numeric support check
   fnumsup = @( val , sup ) val >= sup( 1 ) | val <= sup( 2 ) ;
   
-  % String support check
-  fstrsup = @( str , sup ) ismember( str , sup ) ;
-  
   % Support error strings, for numbers and cell/string arrays
   fnumerr = @( sup ) sprintf( '[%.1f,%.1f]' , sup ) ;
-  fstrerr = @( sup ) [ '{''' , strjoin( sup , ''',''' ) , '''}' ] ;
-  
-  % Contrast string support, allow values between 0 and 1, where contrast
-  % strings are provided.
-  fconsup = @( c ) fnumsup( str2double( cellfun( @( c ) [ c{ : } ] , ...
-    regexp( c , cstrreg , 'tokens' , 'once' ) , ...
-      'UniformOutput' , false ) ) , [ 0 , 1 ] ) ;
   
   % Error checking for each column. Return true if column's type is valid.
   valid.DirectionDeg = fnumchk ;
