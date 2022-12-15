@@ -29,7 +29,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   %%% Global constant %%%
   
   % Number of fixed input args
-  NFIXARG = 3 ;
+  NFIXARG = 6 ;
 
   
   %%% Error check editable vars %%%
@@ -90,7 +90,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   if  nargin > NFIXARG
     
     % Check for missing named Gizmos
-    missing = ~ ismember( varargin , iget( syn , getGizmoNames ) ) ;
+    missing = ~ ismember( varargin , iget( syn , 'getGizmoNames' ) ) ;
     
     % A Gizmo is not missing if the name is 'none'
     missing = missing  &  ~ strcmpi( varargin , 'none' ) ;
@@ -130,7 +130,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
         'BackgroundRGB' } ;
   
   % First block of lines in header with session parameters
-  hdr = cellfun( @( c ) val2str( cfg.( c ) ) , C , uof{ : } ) ;
+  hdr = cellfun( @( c ) [ c , ' ' , val2str( cfg.( c ) ) ], C, uof{ : } ) ;
   
   % Extract screen size
   hdr = [ hdr , ...
@@ -143,7 +143,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   % Add editable variables
   hdr = [ hdr , { sprintf( 'Editable variables %d' , size( C , 2 ) ) } ,...
     cellfun( @( v , x ) [ v , ' ' , x ] , C( 1 , : ) , C( 2 , : ) , ...
-      uof{ : } )' ] ;
+      uof{ : } ) ] ;
   
   % Event marker names
   C = fieldnames( evm )' ;
@@ -157,7 +157,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   
   % Add error names and codes
   hdr = [ hdr , { sprintf( 'Error codes %d' , numel( C ) ) } , ...
-    cellfun( @( c ) sprintf( '%s %d' , c , evm.( c ) ) , C , uof{ : } ) ] ;
+    cellfun( @( c ) sprintf( '%s %d' , c , err.( c ) ) , C , uof{ : } ) ] ;
   
   % Table 2 string
   C = cellfun( @val2str , table2cell( tab ) , uof{ : } ) ;
@@ -180,7 +180,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   hdr = strjoin( hdr , '\n' ) ;
   
   % Send synapse api runtime note
-  if  syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
+  if  ~ syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
     error( 'Failed to deliver session header to Synapse.' )
   end
   

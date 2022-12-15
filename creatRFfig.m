@@ -298,14 +298,14 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
           % Spike times
           t = T( X( : , ch ) > 0 ) ;
           
-          % No spikes, go to next channel
-          if  isempty( t ) , continue , end
-          
           % Convert from times to ms bin index
           t = ceil( ( t - dat.C.time( 1 ) + 1 ) ) ;
           
           % Discard anything that falls off the edges
-          t( t < 0 | t > dat.C.N.time ) = [ ] ;
+          t( t <= 0 | t > dat.C.N.time ) = [ ] ;
+          
+          % No spikes, go to next channel
+          if  isempty( t ) , continue , end
           
           % Raise raster time bins that contain a spike
           R( t , ch ) = 1 ;

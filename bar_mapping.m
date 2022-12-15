@@ -152,8 +152,8 @@ if  TrialData.currentTrial == 1
       P.laserctrl.Enablemanual = false ;
 
     % Create triggered buffer MATLAB objects
-    P.buf.spk = TdtWinBuf( syn , SpikeBuffer ) ;
-    P.buf.mua = TdtWinBuf( syn ,   MuaBuffer ) ;
+    P.buf.spk = TdtWinBuf( P.syn , SpikeBuffer ) ;
+    P.buf.mua = TdtWinBuf( P.syn ,   MuaBuffer ) ;
 
       %- Set fixed buffer parameters -%
 
@@ -183,8 +183,10 @@ if  TrialData.currentTrial == 1
       P.buf.spk.setchsubsel( minchan ) ;
       P.buf.mua.setchsubsel( minchan ) ;
 
-      % Crop buffered data in specified time window around trigger event
-      secs = [ - BaselineMs , VisualLatencyMs + P.sweeptime ] / 1e3 ;
+      % Crop buffered data in specified time window around trigger event.
+      % Include a few extra milliseconds so that MUA interpolation by
+      % onlinefigure does not return NaN.
+      secs = [ -BaselineMs - 5 , VisualLatencyMs + P.sweeptime + 5 ] / 1e3;
       P.buf.spk.settimewin( secs ) ;
       P.buf.mua.settimewin( secs ) ;
 
@@ -227,63 +229,21 @@ elseif  P.UsingSynapse  &&  pre.trialError( end - 1 ) == P.err.Correct
   P.buf.spk.getdata( ) ;
   P.buf.mua.getdata( ) ;
   
-  %-- Update behaviour plots based on previous trial --%
+  % Previous trial's condition
+  pcon = pre.conditions( end - 1 ) ;
   
-    %- Behavioural outcome raster plot -%
-    newdata = struct( 'pre_err', pre.trialError( end - 1 ), ...
-      'pre_block', pre.blocks( end - 1 ), 'nex_block', pre.blocks( end ) );
+  % Properties of previous trial
+  c = P.tab( pcon == P.tab.Condition , : ) ;
+  c = table2struct( c ) ;
+  
+  % Build struct with buffered data from previous trial
+  new.spk.time = P.buf.spk.time * 1e3 ;  new.spk.data = P.buf.spk.data ;
+  new.mua.time = P.buf.mua.time * 1e3 ;  new.mua.data = P.buf.mua.data ;
+  
+  % Update RF map
+  P.ofig.update( 'rfmap' , c.DirectionDeg , new )
     
-    P.ofig.update( 'BehavRaster' , [ ] , newdata )
-    
-    %- Trial info panel -%
-    newdata = struct( 'ind' , TrialData.currentTrial - [ 1 , 0 ] , ...
-      'err' , pre.trialError( end - [ 1 , 0 ] ) , ...
-      'con' , pre.conditions( end - [ 1 , 0 ] ) , ...
-      'blk' , pre.blocks( end - [ 1 , 0 ] ) , ...
-       'rt' , pre.reactionTime( end - [ 1 , 0 ] ) , ...
-      'typ' , [ pre.userVariable{ end - 1 }.BlockType , ...
-        ARCADE_BLOCK_SELECTION_GLOBAL.typ ] , ...
-      'trials' , ARCADE_BLOCK_SELECTION_GLOBAL.count.trials , ...
-      'total' , ARCADE_BLOCK_SELECTION_GLOBAL.count.total ) ;
-    
-    P.ofig.update( 'TrialInfo' , [ ] , newdata )
-    
-    %- Psychometric and reaction time curves -%
-    for  F = { 'Psychometric' , 'Reaction Time' } , f = F{ 1 } ;
-      
-      % Construct graphics object group identifier
-      id = sprintf( '%s Block %d' , ...
-        f , pre.userVariable{ end - 1 }.BlockType ) ;
-      
-      % Information required to update plots
-      index = struct( 'x' , ...
-        P.tab.Contrast( P.tab.Condition == pre.conditions( end - 1 ) ) ,...
-          'err' , pre.trialError( end - 1 ) ) ;
-      newdata = pre.reactionTime( end - 1 ) ;
-      
-      % Update empirical data and find least-squares best fit
-      P.ofig.update( id , index , newdata )
-      P.ofig.fit( id )
-      
-    end % psych & RT curves
-    
-    %- Reaction time histogram -%
-    
-    % Construct group id
-    id = sprintf( 'RT Block %d' , pre.userVariable{ end - 1 }.BlockType ) ;
-    
-    % Update histogram
-    index = pre.reactionTime( end - 1 ) ;
-    newdata = pre.trialError( end - 1 ) ;
-    P.ofig.update( id , index , newdata )
-    
-    % Select groups for new block %
-    if  diff( pre.blocks( end - [ 1 , 0 ] ) )
-      id = sprintf( 'Block %d' , ARCADE_BLOCK_SELECTION_GLOBAL.typ ) ;
-      P.ofig.select( 'set' , id )
-    end
-    
-end % first trial init
+end % trial init
 
 %- Show changes to plots -%
 drawnow
@@ -407,7 +367,7 @@ if  P.simresp
   
   % Determine the vector from starting point of the bar to the centre of
   % the simulated RF
-  vsim = SynthRfXywDeg( 1 : 2 ) - P.Motion.vertices( 1 : 2 ) ;
+  vsim = SynthRfXywDeg( 1 : 2 ) - P.Motion.vertices( 1 : 2 ) / P.pixperdeg;
   
   % Project this onto the unit direction vector of the current trial
   vsim = vsim * [ cosd( c.DirectionDeg ) ;
@@ -438,9 +398,8 @@ end % simulation
     
     % SynapseAPI is live, send run-time note about end of trial
     if  P.UsingSynapse
-      ENDACT.cleanUp{ end + 1 } = @( ) P.syn.setParameterValue( ...
-        'RecordingNotes' , 'Note' , sprintf( 'End trial %d\n' , ...
-          TrialData.currentTrial ) ) ;
+      ENDACT.cleanUp{ end + 1 } = @( ) iset( P.syn , 'RecordingNotes' , ...
+        'Note' , sprintf( 'End trial %d\n' , TrialData.currentTrial ) ) ;
     end
 
 % Special constants for value of max reps
@@ -575,7 +534,7 @@ if  P.UsingSynapse
         TrialData.currentBlock , v.BlockType , c.DirectionDeg , rew ) ;
 
   % Send header to Synapse server
-  if  P.syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
+  if  ~ P.syn.setParameterValue( 'RecordingNotes' , 'Note' , hdr )
     error( 'Failed to send trial header to Synapse.' )
   end
   
@@ -702,7 +661,7 @@ end % Weber
 function  iset( syn , giz , par , val )
   
   % Try to set value of Gizmo parameter
-  if  syn.setParameterValue( giz , par , val )
+  if  ~ syn.setParameterValue( giz , par , val )
     
     % Throw a simple, reader-friendly error message.
     error( [ 'Failed to set parameter %s of Gizmo %s through ' , ...
