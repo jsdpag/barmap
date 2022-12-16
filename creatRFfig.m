@@ -81,7 +81,7 @@ function  ofig = creatRFfig( cfg , evar , tab , minchan )
   %%% Create figure %%%
   
   % Determine the save name of the onlinefigure
-  fnam = [ fullfile( cfg.filepaths.Behaviour, cfg.sessionName ) , '.fig' ];
+  fnam = [ fullfile( cfg.filepaths.Session , cfg.sessionName ) , '.fig' ] ;
   
   % Create onlinefigure object, it starts out being invisible
   ofig = onlinefigure( fnam , 'Tag' , 'Behaviour' , 'Visible' , 'off' ) ;
