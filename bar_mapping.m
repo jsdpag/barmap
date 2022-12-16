@@ -262,6 +262,20 @@ if  TrialData.currentTrial > 1  &&  diff( pre.blocks( end - 1 : end ) )
     waitforuser( 'Bar Mapping' , 14 , ...
       'Bar mapping is complete.\nPlease examine RF map.' )
     
+    % Session footer
+    ftr = [ 'End session ' , cfg.sessionName ] ;
+
+    % Send header to Synapse server
+    if  ~ P.syn.setParameterValue( 'RecordingNotes' , 'Note' , ftr )
+      error( 'Failed to send session footer to Synapse.' )
+    end
+    
+    % Drop out of run-time mode to Idle
+    if  ~ strcmp( P.syn.getModeStr , 'Idle' )  &&  ...
+        ~ P.syn.setModeStr( 'Idle' )
+      warning( 'Failed to set Synapse mode to ''Idle''' )
+    end
+  
     % Explicitly release resources
     delete( P.laserctrl ) , delete( P.buf.spk ) , delete( P.buf.mua )
     delete( P.syn )

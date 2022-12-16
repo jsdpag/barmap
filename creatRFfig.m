@@ -17,6 +17,10 @@ function  ofig = creatRFfig( cfg , evar , tab , minchan )
   % Number of channels
   C.N.chan = minchan ;
   
+  % Index of first MUA channel from MUA buffer. This matters if MUA is
+  % packed alongside LFP.
+  C.msi = evar.MuaStartIndex ;
+  
   % Unique motion directions
   C.dir = unique( tab.DirectionDeg ) ;
   
@@ -239,6 +243,9 @@ end % creatRFfig
 % spike time series axes, and its title will show highlighted direction.
 function  dat = fupdate( ax_spkms , dat , motiondir , new )
   
+  % Point to constants
+  C = dat.C ;
+
   % New channel was selected
   if  isempty( motiondir )
     
@@ -250,7 +257,7 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
     dat.hrf.mua.CData = dat.mua.rf( : , : , ch ) ;
     
     % Assign time series for each direction
-    for  i = 1 : dat.C.N.dir
+    for  i = 1 : C.N.dir
       dat.hms.spk( i ).YData = dat.spk.time( : , i , ch ) ./ dat.trials ;
       dat.hms.mua( i ).YData = dat.mua.time( : , i , ch ) ./ dat.trials ;
     end
@@ -262,10 +269,10 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
   end % new channel
   
   % Index of motion direction
-  idir = dat.C.dir == motiondir ;
+  idir = C.dir == motiondir ;
   
   % Old index of motion direction
-  iold = dat.C.dir == dat.dir   ;
+  iold = C.dir == dat.dir   ;
   
   % Direction was the same, we don't need to highlight different lines
   samedir = any( idir & iold ) ;
@@ -290,19 +297,19 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
       case  'spk'
         
         % First, allocate spike raster, ms time bins x channels
-        R = zeros( dat.C.N.time , dat.C.N.chan ) ;
+        R = zeros( C.N.time , C.N.chan ) ;
         
         % Channels
-        for  ch = 1 : dat.C.N.chan
+        for  ch = 1 : C.N.chan
           
           % Spike times
           t = T( X( : , ch ) > 0 ) ;
           
           % Convert from times to ms bin index
-          t = ceil( ( t - dat.C.time( 1 ) + 1 ) ) ;
+          t = ceil( ( t - C.time( 1 ) + 1 ) ) ;
           
           % Discard anything that falls off the edges
-          t( t <= 0 | t > dat.C.N.time ) = [ ] ;
+          t( t <= 0 | t > C.N.time ) = [ ] ;
           
           % No spikes, go to next channel
           if  isempty( t ) , continue , end
@@ -313,13 +320,16 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
         end % channels
         
         % Convolve spike raster with causal exponential kernel
-        X = makconv( R , dat.C.kern , 'c' ) ;
+        X = makconv( R , C.kern , 'c' ) ;
         
       % Continuous multiunit activity
       case  'mua'
         
+        % Keep only MUA channels
+        X( : , [ 1 : C.msi - 1 , C.msi + C.N.chan : end ] ) = [ ] ;
+        
         % Linear interpolation at specified millisecond time bins
-        X = interp1( T , X , dat.C.time ) ;
+        X = interp1( T , X , C.time ) ;
         
     end % process neural data
     
@@ -328,14 +338,14 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
       dat.( tag ).time( : , idir , : ) + permute( X , [ 1 , 3 , 2 ] ) ;
     
     % Keep only the time bins from the bar sweep
-    X( dat.C.i , : ) = [ ] ;
+    X( C.i , : ) = [ ] ;
     
     % Adjacent ms bins are averaged together to create spatial bins
-    if  dat.C.msperbin > 1
+    if  C.msperbin > 1
       
       % Re-arrange ms bins into groups. Each group of ms bins is a column.
       % Group elements span rows. Channels extend along dim 3.
-      X = reshape( X , dat.C.msperbin , dat.C.N.space , dat.C.N.chan  ) ;
+      X = reshape( X , C.msperbin , C.N.space , C.N.chan  ) ;
       
       % Average of adjacent ms bins to produce spatial bins
       X = mean( X , 1 ) ;
