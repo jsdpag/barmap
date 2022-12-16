@@ -19,7 +19,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
 % names. Checks for named Gizmos. Also makes sure that Synapse is in a
 % run-time mode. Generates ARCADE session header and sends to Synapse as
 % run-time note; these include information about the setup, the event
-% markers, and error codes.
+% markers, and error codes. tab can be empty [ ] if it is not available.
 % 
 % Returns empty [ ] if TdtHostPC is 'none'.
 % 
@@ -35,16 +35,26 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   %%% Error check editable vars %%%
   
   % Primary parameters are strings
-  checkvar(       TdtHostPC , 'TdtHostPC'       )
-  checkvar(   TdtExperiment , 'TdtExperiment'   )
+  checkstr(       TdtHostPC , 'TdtHostPC'       )
+  checkstr(   TdtExperiment , 'TdtExperiment'   )
   
     % No TDT Host PC has been named. Quit now and return empty.
     if  strcmp( TdtHostPC , 'none' ) , syn = [ ] ; return , end
   
   % Gizmo names are strings
   for  i = 1 : nargin - NFIXARG
-    checkvar( varargin{ i } , sprintf( 'Input arg %d' , i + NFIXARG ) )
+    checkstr( varargin{ i } , sprintf( 'Input arg %d' , i + NFIXARG ) )
   end
+  
+  % Check struct input args
+  checkstruct( evm , 'evm' )
+  checkstruct( err , 'err' )
+  
+  % Make empty table
+  if  isempty( tab ) , tab = table ; end
+  
+  % Check table
+  if  ~ istable( tab ) , error( 'tab must be a MATLAB table object' ) , end
   
   
   %%% Establish link to Synapse %%%
@@ -78,7 +88,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
     else
       
       % Prompt user
-      waitforuser( 'Bar Mapping' , 14 , ...
+      waitforuser( 'Synapse Init' , 14 , ...
         'Please change Synapse %s from %s to %s.' , snam , vsyn , varc )
       
     end % check property values
@@ -111,7 +121,7 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
   while  iget( syn , 'getMode' ) < 2
     
     % Prompt user
-    waitforuser( 'Bar Mapping' , 14 , ...
+    waitforuser( 'Synapse Init' , 14 , ...
       'Please put Synapse into a run-time mode.' )
     
   end % run-time mode
@@ -168,6 +178,9 @@ function  syn = initsynapse( cfg , tab , evm , err , TdtHostPC , ...
     % Produce comma-separated values
     C = cellfun( @( c ) strjoin( c , ',' ), num2cell( C , 2 ), uof{ : } )';
     
+    % Remove empty lines
+    C( cellfun( @isempty , C ) ) = [ ] ;
+    
     % Add trial condition table
     hdr = ...
       [ hdr , { sprintf( 'Trial condition table %d' , numel( C ) ) } , C ];
@@ -190,7 +203,7 @@ end % initsynapse
 %%% Sub-routines %%%
 
 % Check that variable is a classic String
-function  checkvar( var , nam )
+function  checkstr( var , nam )
   
   % Correctly formatted
   if  ischar( var ) && isrow( var ) , return , end
@@ -199,6 +212,28 @@ function  checkvar( var , nam )
   error( '%s must be a classic string i.e. char row vector' , nam )
   
 end % checkvar
+
+
+% Check that variable is a scalar struct with fields that contain scalar
+% numbers
+function  checkstruct( var , nam )
+  
+  % Basic checks
+  if  ~ ( isscalar( var ) && isstruct( var ) )
+    error( '%s must be a scalar struct' , nam )
+  end
+  
+  % Field names
+  for  F = fieldnames( var )' , f = F{ 1 } ;  x = var.( f ) ;
+    
+    % Check field contents
+    if  ~ ( isscalar( x ) && isnumeric( x ) )
+      error( '%s.%s must be scalar numeric' , nam , f )
+    end
+    
+  end % field names
+  
+end % checkstruct
 
 
 % Try to retrieve information from SynapseAPI object. Raise an error on

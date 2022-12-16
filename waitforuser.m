@@ -7,6 +7,7 @@ function  waitforuser( tit , fs , fmt , varargin )
 % button. fontsize is the size of the message, in points. The remaining
 % input arguments are fed directly to sprintf( formatstring , <fmt args> ).
 % 
+% Jackson Smith - December 2022 - Fries Lab (ESI Frankfurt)
   
   % Format message for user
   msg = sprintf( [ '\\fontsize{%f}' , fmt , '\nHit OK when ready.' ] , ...
