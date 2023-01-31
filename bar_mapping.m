@@ -46,6 +46,24 @@ P = persist ;
 
 if  TrialData.currentTrial == 1
   
+  % Extra toolboxes required by this task
+  PATHS = { 'TDTMatlabSDK' , 'mak' , 'tdt-windowed-buffering' } ;
+  GENPAT = { 'TDTMatlabSDK' } ;
+
+  % Toolboxes , get absolute path
+  for  TB = PATHS , tb = [ 'C:\Toolbox\' , TB{ 1 } ] ;
+    
+    % Cannot find Toolbox, report error to user
+    if  ~ exist( tb , 'dir' ), error( 'Cannot find Toolbox: %s' , tb ), end
+    
+    % Expand recursively into toolbox sub-directories
+    if  any( strcmp( TB{ 1 } , GENPAT ) ) , tb = genpath( tb ) ; end
+    
+    % Add to path
+    addpath( tb )
+    
+  end % toolboxes
+  
   % Store local pointer to table defining blocks of trials
   P.tab = ARCADE_BLOCK_SELECTION_GLOBAL.tab ;
   
