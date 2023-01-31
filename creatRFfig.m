@@ -314,8 +314,9 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
           % No spikes, go to next channel
           if  isempty( t ) , continue , end
           
-          % Raise raster time bins that contain a spike
-          R( t , ch ) = 1 ;
+          % Raise raster time bins that contain a spike. Assigns value in
+          % spikes per second.
+          R( t , ch ) = 1e3 ;
           
         end % channels
         
