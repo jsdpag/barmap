@@ -47,7 +47,8 @@ P = persist ;
 if  TrialData.currentTrial == 1
   
   % Extra toolboxes required by this task
-  PATHS = { 'TDTMatlabSDK' , 'mak' , 'tdt-windowed-buffering' } ;
+  PATHS = { 'TDTMatlabSDK' , 'mak' , 'laser-signals' , ...
+            'tdt-windowed-buffering' } ;
   GENPAT = { 'TDTMatlabSDK' } ;
 
   % Toolboxes , get absolute path
