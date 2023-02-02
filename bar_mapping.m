@@ -453,7 +453,8 @@ STATE_TABLE = ...
 {       'Start' ,     5000 , 'Ignored' ,  'FixIn' , 'HoldFix' , { 'Stim' , { P.Fix } , 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] , P.Fix , 'lineColor' , [ 255 , 255 , 255 ] } , 'Photodiode' , 'on' , 'Reset' , P.StimServerAnimationDone } ;
       'HoldFix' ,      300 , 'Wait'    ,  { 'FixOut' , 'BlinkStart' } , { 'GetFix' , 'Blink' } , { 'StimProp' , { P.Fix , 'faceColor' , [ 255 , 255 , 255 ] , P.Fix , 'lineColor' , [ 000 , 000 , 000 ] } , 'Reset' , [ P.BlinkStart , P.BlinkEnd ] } ;
          'Wait' ,BaselineMs, 'BarOn'   ,  { 'FixOut' , 'BlinkStart' } , { 'BrokenFix' , 'Blink' } , {} ;
-        'BarOn' ,   BarTime, 'Correct' ,  { 'FixOut' , 'BlinkStart' , 'StimServerAnimationDone' } , { 'BrokenFix' , 'Blink' , 'Correct' } , { 'Stim' , { P.Bar } , 'Photodiode' , 'off' } ;
+...        'BarOn' ,   BarTime, 'Correct' ,  { 'FixOut' , 'BlinkStart' , 'StimServerAnimationDone' } , { 'BrokenFix' , 'Blink' , 'Correct' } , { 'Stim' , { P.Bar } , 'Photodiode' , 'off' } ;
+        'BarOn' ,   BarTime, 'Correct' ,  { 'FixOut' , 'BlinkStart' } , { 'BrokenFix' , 'Blink' } , { 'Stim' , { P.Bar } , 'Photodiode' , 'off' } ;
        'GetFix' ,     5000 , 'Ignored' ,  'FixIn' , 'HoldFix' , { 'StimProp' , { P.Fix , 'faceColor' , [ 000 , 000 , 000 ] , P.Fix , 'lineColor' , [ 255 , 255 , 255 ] } } ;
       'Ignored' ,        0 , 'cleanUp' , {} , {} , {} ;
         'Blink' ,     5000 , 'cleanUp' , 'BlinkEnd' , 'cleanUp' , {} ;
