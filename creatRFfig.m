@@ -290,6 +290,9 @@ function  dat = fupdate( ax_spkms , dat , motiondir , new )
     T = new.( tag ).time ;
     X = new.( tag ).data ;
     
+    % There is no data, continue to next modality
+    if  isempty( T ) || isempty( X ) , continue , end
+    
     % Process data according to type
     switch  tag
       
