@@ -99,10 +99,10 @@ function  onEntry_generic( a )
     
     % SynapseAPI is live, send a run-time note with the trial outcome
     if  a.synflg  &&  ~ a.syn.setParameterValue( 'RecordingNotes' , ...
-        'Note' , sprintf( 'Outcome %s' , a.TrialError ) )
+        'Note' , sprintf( 'Outcome %s' , a.State.name ) )
         
-      error( 'Failed to deliver run-time note to Synapse: Outcome %d' , ...
-        a.TrialError )
+      error( 'Failed to deliver run-time note to Synapse: Outcome %s' , ...
+        a.State.name )
       
     end
   end % Trial error code
