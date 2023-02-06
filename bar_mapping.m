@@ -131,10 +131,12 @@ if  TrialData.currentTrial == 1
     % fixation window will be made on first trial.
     P.FixTol = NaN ;
   
-  % Make tic time measurement at end of previous trial for ITI measure
+  % Make tic time measurement at end of Wait and cleanUp states, for ITI
+  P.WaitEnd  = StateRuntimeVariable ;
   P.ITIstart = StateRuntimeVariable ;
   
-    % Initialise P.ITIstart to zero, so that we don't wait on first trial
+    % Initialise to zero, so that we don't wait on first trial
+     P.WaitEnd.value = zeros( 1 , 'uint64' ) ;
     P.ITIstart.value = zeros( 1 , 'uint64' ) ;
   
   % Ideal duration of one sweep by the bar, in milliseconds
@@ -303,7 +305,7 @@ if  TrialData.currentTrial > 1  &&  diff( pre.blocks( end - 1 : end ) )
   
   % Explicitly release resources
   for  E = { 'StimServerAnimationDone' , 'BlinkStart' , 'BlinkEnd' , ...
-      'Bar' , 'Fix' , 'Motion' , 'ITIstart' }
+      'Bar' , 'Fix' , 'Motion' , 'WaitEnd' , 'ITIstart' }
     delete( P.( E{ 1 } ) ) ;
   end
   
@@ -418,6 +420,12 @@ end % simulation
 
 % Special actions executed when state is finished executing. Remember to
 % make this a column vector of cells.
+  
+  % Wait measures time so that we can guarantee that Synapse buffers linked
+  % to TdtWinBuf objects have finished counting down the response window.
+  if  P.UsingSynapse
+    ENDACT.Wait = { @( ) P.WaitEnd.set_value( tic ) } ;
+  end
   
   % Guarantee that bar motion animation is stopped
   ENDACT.BarOn = { @( ) P.Bar.stop_animation( ) } ;
@@ -581,6 +589,18 @@ end % synapse running
 %%% Complete previous trial's inter-trial-interval %%%
 
 sleep( ItiMinMs  -  1e3 * toc( P.ITIstart.value ) )
+
+% Using synapse
+if  P.UsingSynapse
+  
+  % Longest response window, in seconds
+  mrw = max( P.buf.spk.respwin , P.buf.mua.respwin ) ;
+  
+  % Guarantee that windowed buffer Gizmo response window timer has expired
+  % before launching new trial
+  sleep( 1e3 * ( mrw - toc( P.WaitEnd.value ) ) )
+  
+end % synapse
 
 
 %%% --- SCRIPT FUNCTIONS --- %%%
